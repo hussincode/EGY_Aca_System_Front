@@ -1,8 +1,13 @@
 import { BarChartSquare02, Folder, HomeLine, MessageChatCircle, PieChart03, Rows01, Settings01 } from "@untitledui/icons";
-import { NavLink } from "react-router-dom";
-import { useState } from "react";
+import { NavLink, useNavigate } from "react-router-dom";
+import { type Dispatch, type SetStateAction, useState } from "react";
 import logo from "@/assets/logo.jpg";
 import AppIcon from "@/components/AppIcon";
+
+interface SidebarProps {
+    isOpen: boolean;
+    setIsOpen: Dispatch<SetStateAction<boolean>>;
+}
 
 const sidebarSections = [
     {
@@ -32,25 +37,44 @@ const sidebarSections = [
     },
 ];
 
-const Sidebar = () => {
-    const [isOpen, setIsOpen] = useState(false);
+const Sidebar = ({ isOpen, setIsOpen }: SidebarProps) => {
+    const [isHovered, setIsHovered] = useState(false);
+    const navigate = useNavigate();
+
+    const handleLogout = () => {
+        window.api?.logout?.();
+        window.localStorage.removeItem('loggedInUser');
+        navigate('/login', { replace: true });
+    };
+
+    const mobileClose = () => setIsOpen(false);
 
     return (
         <>
             <div
-                className={`fixed inset-0 z-40 bg-slate-950/50 transition-opacity duration-300 ${
+                className={`fixed inset-0 z-40 bg-slate-950/50 transition-opacity duration-300 lg:hidden ${
                     isOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
                 }`}
-                onClick={() => setIsOpen(false)}
+                onClick={mobileClose}
             />
 
             <aside
-                onMouseEnter={() => setIsOpen(true)}
-                onMouseLeave={() => setIsOpen(false)}
+                onMouseEnter={() => setIsHovered(true)}
+                onMouseLeave={() => setIsHovered(false)}
                 className={`fixed right-0 top-0 z-50 h-full border-l border-slate-800 bg-slate-950 text-slate-100 shadow-2xl transition-all duration-300 ${
-                    isOpen ? "w-72 px-5 py-6 overflow-y-auto hide-scrollbar" : "w-16 px-1 py-4 overflow-hidden"
-                }`}
+                    isOpen || isHovered ? "w-72 px-5 py-6 overflow-y-auto hide-scrollbar translate-x-0" : "w-16 px-1 py-4 overflow-hidden lg:translate-x-0 translate-x-full"
+                } ${isOpen ? "block" : "hidden lg:block"}`}
             >
+                <div className="mb-4 lg:hidden">
+                    <button
+                        type="button"
+                        onClick={mobileClose}
+                        className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2 text-sm text-slate-100 transition hover:bg-slate-800"
+                    >
+                        <span className="text-lg">×</span>
+                        إغلاق
+                    </button>
+                </div>
                 <div className="mb-10 transition-all duration-300">
                     <div className={`flex items-center gap-3 ${isOpen ? "justify-start" : "justify-center"}`}>
                         <img src={logo} alt="Academy Logo" className="h-10 w-10 rounded-xl object-cover" />
@@ -104,7 +128,7 @@ const Sidebar = () => {
                         </NavLink>
                         <button
                             type="button"
-                            onClick={() => alert('تسجيل الخروج')}
+                            onClick={handleLogout}
                             className="flex w-full items-center gap-3 rounded-2xl bg-slate-900 px-3 py-3 text-left text-slate-300 transition hover:bg-slate-800"
                         >
                             <span className="text-slate-300">⇦</span>

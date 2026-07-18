@@ -1170,7 +1170,7 @@ export default function Subscriptions() {
 
       {isSubscriptionModalOpen ? (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/60 p-4">
-          <div className="w-full max-w-4xl rounded-3xl bg-white p-6 shadow-2xl">
+          <div className="w-full max-w-2xl max-h-[calc(100vh-4rem)] overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-2xl font-semibold text-slate-900">

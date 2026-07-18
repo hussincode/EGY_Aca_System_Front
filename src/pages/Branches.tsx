@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Folder, Gift02, SearchSm } from '@untitledui/icons';
+import { Folder, SearchSm } from '@untitledui/icons';
 import AppIcon from '@/components/AppIcon';
 
 type Branch = {
@@ -66,12 +66,55 @@ function resolveBranchData(raw: Record<string, unknown> | null | undefined): Bra
   };
 }
 
+function getApiToken() {
+  if (typeof window === 'undefined') return null;
+  return window.localStorage.getItem('api_token');
+}
+
+function resolveApiUrl(url: string) {
+  const normalized = url.startsWith('/api') ? url : `/api${url.startsWith('/') ? url : `/${url}`}`;
+  return `${import.meta.env.VITE_API_BASE || ''}${normalized}`;
+}
+
+async function fetchJson<T = unknown>(url: string, options: RequestInit = {}) {
+  const headers = new Headers(options.headers || {});
+  const token = getApiToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  if (options.body != null && !(options.body instanceof FormData) && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  const response = await fetch(resolveApiUrl(url), {
+    credentials: 'include',
+    ...options,
+    headers,
+  });
+
+  const text = await response.text();
+  let payload: unknown;
+  try {
+    payload = text ? JSON.parse(text) : undefined;
+  } catch {
+    payload = text;
+  }
+
+  if (!response.ok) {
+    const message =
+      typeof payload === 'object' && payload !== null && 'message' in payload
+        ? String((payload as { message?: unknown }).message || response.statusText)
+        : response.statusText || 'API request failed';
+    throw new Error(message);
+  }
+
+  return payload as T;
+}
+
 export default function Branches() {
   const [branches, setBranches] = useState<Branch[]>(() => readLocalBranches());
   const [search, setSearch] = useState('');
-  const [isUsingAPI, setIsUsingAPI] = useState(() => typeof window !== 'undefined' ? !!window.api?.getToken?.() : false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingBranchId, setEditingBranchId] = useState<string | null>(null);
+  const [branchToDelete, setBranchToDelete] = useState<Branch | null>(null);
   const [formState, setFormState] = useState<BranchFormState>({ name: '', manager: '', location: '' });
   const [toast, setToast] = useState<ToastState | null>(null);
 
@@ -135,13 +178,12 @@ export default function Branches() {
     setToast({ message, type });
   };
 
-  const loadBranches = async (useApi = isUsingAPI) => {
+  const loadBranches = async () => {
     if (typeof window === 'undefined') return;
 
-    const api = window.api;
-    if (useApi && api?.getToken && api.getBranches) {
+    if (getApiToken()) {
       try {
-        const response = await api.getBranches();
+        const response = await fetchJson<{ data?: unknown[] }>('/branches');
         const items = Array.isArray(response?.data)
           ? response.data.map((item) => resolveBranchData(item as Record<string, unknown> | null | undefined))
           : [];
@@ -161,7 +203,6 @@ export default function Branches() {
   };
 
   const switchToLocalMode = (message = '') => {
-    setIsUsingAPI(false);
     const local = readLocalBranches();
     setBranches(local);
     if (message) showToast(message, 'warning');
@@ -192,6 +233,52 @@ export default function Branches() {
     setFormState({ name: '', manager: '', location: '' });
   };
 
+  const requestDeleteBranch = (branchId: string) => {
+    if (!canManageBranches) {
+      showToast('حذف الفروع متاح للأدمن فقط', 'error');
+      return;
+    }
+
+    const branch = branches.find((item) => item.id === branchId);
+    if (!branch) return;
+    setBranchToDelete(branch);
+  };
+
+  const cancelDeleteBranch = () => {
+    setBranchToDelete(null);
+  };
+
+  const deleteBranch = async (branchId: string) => {
+    const branch = branches.find((item) => item.id === branchId);
+    if (!branch) return;
+
+    if (getApiToken()) {
+      try {
+        await fetchJson(`/branches/${branchId}`, { method: 'DELETE' });
+        showToast('تم حذف الفرع عبر الباك إند', 'success');
+        await loadBranches();
+        setBranchToDelete(null);
+        return;
+      } catch (error) {
+        if (isApiConnectivityError(error)) {
+          showToast('تعذر الوصول للباك إند، تم الحذف محلياً', 'warning');
+          switchToLocalMode();
+        } else {
+          showToast((error as { message?: string } | undefined)?.message || 'فشل حذف الفرع', 'error');
+          return;
+        }
+      }
+    }
+
+    setBranches((current) => {
+      const next = current.filter((item) => item.id !== branchId);
+      window.localStorage.setItem(BRANCHES_KEY, JSON.stringify(next));
+      return next;
+    });
+    showToast('تم حذف الفرع محلياً', 'success');
+    setBranchToDelete(null);
+  };
+
   const saveBranch = async () => {
     if (!formState.name.trim()) {
       showToast('اسم الفرع مطلوب', 'error');
@@ -205,17 +292,30 @@ export default function Branches() {
       location: formState.location.trim(),
     };
 
-    const api = window.api;
-    if (isUsingAPI && api?.getToken) {
+    if (getApiToken()) {
       try {
         if (editingBranchId) {
-          await api.updateBranch?.(payload.id, payload);
+          await fetchJson('/branches/' + payload.id, {
+            method: 'PUT',
+            body: JSON.stringify({
+              name: payload.name,
+              manager: payload.manager,
+              location: payload.location,
+            }),
+          });
           showToast('تم تعديل الفرع عبر الباك إند', 'success');
         } else {
-          await api.createBranch?.(payload);
+          await fetchJson('/branches', {
+            method: 'POST',
+            body: JSON.stringify({
+              name: payload.name,
+              manager: payload.manager,
+              location: payload.location,
+            }),
+          });
           showToast('تم إضافة الفرع عبر الباك إند', 'success');
         }
-        await loadBranches(true);
+        await loadBranches();
         closeBranchModal();
         return;
       } catch (error) {
@@ -240,58 +340,6 @@ export default function Branches() {
     closeBranchModal();
   };
 
-  const deleteBranch = async (branchId: string) => {
-    if (!canManageBranches) {
-      showToast('حذف الفروع متاح للأدمن فقط', 'error');
-      return;
-    }
-
-    if (!window.confirm('هل تريد حذف هذا الفرع؟')) return;
-
-    const api = window.api;
-    if (isUsingAPI && api?.getToken) {
-      try {
-        await api.deleteBranch?.(branchId);
-        showToast('تم حذف الفرع عبر الباك إند', 'success');
-        await loadBranches(true);
-        return;
-      } catch (error) {
-        if (isApiConnectivityError(error)) {
-          showToast('تعذر الوصول للباك إند، تم الحذف محلياً', 'warning');
-          switchToLocalMode();
-        } else {
-          showToast((error as { message?: string } | undefined)?.message || 'فشل حذف الفرع', 'error');
-          return;
-        }
-      }
-    }
-
-    setBranches((current) => {
-      const next = current.filter((item) => item.id !== branchId);
-      window.localStorage.setItem(BRANCHES_KEY, JSON.stringify(next));
-      return next;
-    });
-    showToast('تم حذف الفرع محلياً', 'success');
-  };
-
-  const toggleApiMode = async () => {
-    if (typeof window === 'undefined') return;
-    if (!window.api?.getToken) {
-      showToast('يلزم تسجيل دخول على الباك إند لتفعيل وضع API', 'error');
-      return;
-    }
-
-    const nextMode = !isUsingAPI;
-    setIsUsingAPI(nextMode);
-    if (nextMode) {
-      await loadBranches(true);
-    } else {
-      setBranches(readLocalBranches());
-    }
-  };
-
-  const apiLabel = isUsingAPI ? 'Backend Sync: API' : 'Backend Sync: Local';
-
   return (
     <div className="space-y-6">
       <div className="rounded-3xl bg-white p-6 shadow-sm shadow-slate-200 ring-1 ring-slate-200/70">
@@ -311,14 +359,6 @@ export default function Branches() {
               className="inline-flex items-center gap-2 rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700"
             >
               إضافة فرع
-            </button>
-            <button
-              type="button"
-              onClick={toggleApiMode}
-              className={`inline-flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold transition ${isUsingAPI ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-slate-50 text-slate-800 hover:bg-slate-100'}`}
-            >
-              <AppIcon icon={Gift02} className={isUsingAPI ? 'text-white' : 'text-slate-500'} />
-              {apiLabel}
             </button>
           </div>
         </div>
@@ -407,7 +447,7 @@ export default function Branches() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => deleteBranch(branch.id)}
+                          onClick={() => requestDeleteBranch(branch.id)}
                           className="rounded-2xl bg-rose-100 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-200"
                         >
                           حذف
@@ -471,6 +511,37 @@ export default function Branches() {
                 className="rounded-2xl bg-sky-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-sky-700"
               >
                 حفظ
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {branchToDelete ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/70 p-4">
+          <div className="w-full max-w-lg overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-slate-200">
+            <div className="border-b border-slate-200 px-6 py-5 text-right">
+              <h3 className="text-xl font-semibold text-slate-900">تأكيد الحذف</h3>
+            </div>
+            <div className="space-y-4 p-6 text-right">
+              <p className="text-slate-700">هل أنت متأكد لحذف الفرع التالي؟</p>
+              <p className="rounded-3xl bg-slate-50 p-4 text-lg font-semibold text-slate-900">{branchToDelete.name}</p>
+              <p className="text-sm text-slate-500">بعد الحذف، لا يمكن استعادة بيانات هذا الفرع بسهولة.</p>
+            </div>
+            <div className="flex flex-wrap items-center justify-end gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4">
+              <button
+                type="button"
+                onClick={cancelDeleteBranch}
+                className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={() => deleteBranch(branchToDelete.id)}
+                className="rounded-2xl bg-rose-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-rose-700"
+              >
+                حذف الفرع
               </button>
             </div>
           </div>

@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
-import { BarChartSquare02, Bell03, Gift02, MessageChatCircle, Phone01, SearchSm } from '@untitledui/icons';
+import { BarChartSquare02, Gift02, MessageChatCircle, Phone01 } from '@untitledui/icons';
 import AppIcon from '@/components/AppIcon';
 
 type StaffPayType = 'hour' | 'fixed' | 'percent';
@@ -43,113 +43,74 @@ declare global {
   }
 }
 
-const STAFF_KEY = 'academy_staff';
+const initialFormState: StaffFormState = {
+  name: '',
+  phone: '',
+  role: '',
+  payType: 'hour',
+  rate: 0,
+  hours: 0,
+  revenue: 0,
+};
 
-function readStoredStaff(): StaffMember[] {
-  if (typeof window === 'undefined') return [];
-  const saved = window.localStorage.getItem(STAFF_KEY);
-  if (!saved) return [];
+function readStoredData<T>(key: string, fallback: T): T {
+  if (typeof window === 'undefined') return fallback;
+  const value = window.localStorage.getItem(key);
+  if (!value) return fallback;
   try {
-    return JSON.parse(saved) as StaffMember[];
+    return JSON.parse(value) as T;
   } catch {
-    return [];
+    return fallback;
   }
 }
 
 function buildEmptyForm(): StaffFormState {
-  return {
-    name: '',
-    phone: '',
-    role: '',
-    payType: 'hour',
-    rate: 0,
-    hours: 0,
-    revenue: 0,
-  };
+  return { ...initialFormState };
 }
 
-function ensureSerial(staff: StaffMember[]): StaffMember[] {
+function formatStaffSerial(sequence: number) {
+  return `STF-${String(sequence).padStart(5, '0')}`;
+}
+
+function getNextStaffSequence(staff: StaffMember[]) {
   const used = new Set<number>();
   staff.forEach((member) => {
-    const match = member.staffSerial.match(/^STF-(\d{3})$/);
+    const match = member.staffSerial.match(/^STF-(\d{5})$/);
     if (match) used.add(Number(match[1]));
   });
-
-  let next = 1;
-  return staff.map((member) => {
-    if (member.staffSerial && /^STF-\d{3}$/.test(member.staffSerial)) {
-      return member;
-    }
-    while (used.has(next)) next += 1;
-    const serial = `STF-${String(next).padStart(3, '0')}`;
-    used.add(next);
-    next += 1;
-    return { ...member, staffSerial: serial };
-  });
+  for (let i = 1; i <= 99999; i += 1) {
+    if (!used.has(i)) return i;
+  }
+  return 1;
 }
 
 export default function Staff() {
-  const [staff, setStaff] = useState<StaffMember[]>(() => ensureSerial(readStoredStaff()));
+  const [staff, setStaff] = useState<StaffMember[]>(() => readStoredData('staff', []));
   const [formState, setFormState] = useState<StaffFormState>(buildEmptyForm());
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   useEffect(() => {
-    window.localStorage.setItem(STAFF_KEY, JSON.stringify(staff));
+    window.localStorage.setItem('staff', JSON.stringify(staff));
   }, [staff]);
+
+  useEffect(() => {
+    const sync = () => setStaff(readStoredData('staff', []));
+    window.addEventListener('storage', sync);
+    return () => window.removeEventListener('storage', sync);
+  }, []);
 
   const metrics = useMemo(() => {
     return staff.reduce(
       (acc, member) => {
-        const amount = member.payType === 'hour'
-          ? member.rate * member.hours
-          : member.payType === 'percent'
-          ? (member.rate / 100) * member.revenue
-          : member.rate;
-
-        if (member.payType === 'hour') acc.hour += amount;
-        if (member.payType === 'fixed') acc.fixed += amount;
-        if (member.payType === 'percent') acc.percent += amount;
+        if (member.payType === 'hour') acc.hour += member.rate * member.hours;
+        if (member.payType === 'fixed') acc.fixed += member.rate;
+        if (member.payType === 'percent') acc.percent += (member.rate / 100) * member.revenue;
         return acc;
       },
-      { hour: 0, fixed: 0, percent: 0 },
+      { hour: 0, fixed: 0, percent: 0 }
     );
   }, [staff]);
-
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!formState.name.trim() || !formState.role.trim()) {
-      window.alert('الاسم والوظيفة مطلوبان');
-      return;
-    }
-
-    const payload: StaffMember = {
-      id: editingIndex !== null && staff[editingIndex]?.id ? staff[editingIndex].id : Date.now().toString(),
-      staffSerial: editingIndex !== null && staff[editingIndex]?.staffSerial
-        ? staff[editingIndex].staffSerial
-        : 'STF-000',
-      name: formState.name.trim(),
-      phone: formState.phone.trim(),
-      role: formState.role.trim(),
-      payType: formState.payType,
-      rate: formState.rate,
-      hours: formState.hours,
-      revenue: formState.revenue,
-    };
-
-    setStaff((current) => {
-      const normalized = ensureSerial([
-        ...current.slice(0, editingIndex ?? current.length),
-        payload,
-        ...current.slice((editingIndex ?? current.length) + 1),
-      ]);
-      return editingIndex !== null
-        ? normalized
-        : normalized;
-    });
-
-    setEditingIndex(null);
-    setFormState(buildEmptyForm());
-  };
 
   const handleEdit = (index: number) => {
     const member = staff[index];
@@ -163,6 +124,42 @@ export default function Staff() {
       hours: member.hours,
       revenue: member.revenue,
     });
+    setIsModalOpen(true);
+  };
+
+  const openStaffModal = () => {
+    setEditingIndex(null);
+    setFormState(buildEmptyForm());
+    setIsModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setIsModalOpen(false);
+    setEditingIndex(null);
+    setFormState(buildEmptyForm());
+  };
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (editingIndex !== null) {
+      setStaff((current) =>
+        current.map((member, index) => (index === editingIndex ? { ...member, ...formState } : member))
+      );
+    } else {
+      setStaff((current) => [
+        ...current,
+        {
+          id: typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+            ? crypto.randomUUID()
+            : `${Date.now()}-${Math.random()}`,
+          staffSerial: formatStaffSerial(getNextStaffSequence(current)),
+          ...formState,
+        },
+      ]);
+    }
+
+    closeModal();
   };
 
   const handleDelete = (index: number) => {
@@ -175,7 +172,9 @@ export default function Staff() {
   };
 
   const handleInlineUpdate = (index: number, key: 'hours' | 'revenue', value: number) => {
-    setStaff((current) => current.map((member, idx) => (idx === index ? { ...member, [key]: value } : member)));
+    setStaff((current) =>
+      current.map((member, idx) => (idx === index ? { ...member, [key]: value } : member))
+    );
   };
 
   const handleSyncStaffPayments = (showAlert = false) => {
@@ -236,7 +235,6 @@ export default function Staff() {
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const formTitle = editingIndex !== null ? 'تعديل موظف' : 'إضافة موظف';
 
   return (
     <div className="space-y-6">
@@ -261,18 +259,127 @@ export default function Staff() {
             </button>
             <button
               type="button"
-              onClick={() => {
-                const form = document.getElementById('staffForm') as HTMLFormElement | null;
-                form?.requestSubmit();
-              }}
+              onClick={openStaffModal}
               className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700"
             >
               <span className="text-lg">+</span>
-              حفظ الموظف
+              ضيف موظف
             </button>
           </div>
         </div>
       </div>
+
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/60 p-4">
+          <div className="w-full max-w-2xl overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-slate-200">
+            <div className="flex items-start justify-between border-b border-slate-200 px-6 py-4">
+              <div>
+                <h2 className="text-xl font-semibold text-slate-900">
+                  {editingIndex !== null ? 'تعديل موظف' : 'ضيف موظف'}
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">املأ بيانات الموظف ثم اضغط حفظ.</p>
+              </div>
+              <button
+                type="button"
+                onClick={closeModal}
+                className="text-2xl leading-none text-slate-500 transition hover:text-slate-900"
+              >
+                ×
+              </button>
+            </div>
+
+            <form id="staffModalForm" onSubmit={handleSubmit} className="grid gap-4 p-6 sm:grid-cols-2">
+              <div className="space-y-4">
+                <label className="block text-right text-sm font-medium text-slate-700">
+                  الاسم الكامل
+                  <input
+                    value={formState.name}
+                    onChange={(event) => setFormState((prev) => ({ ...prev, name: event.target.value }))}
+                    className="mt-2 w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
+                    required
+                  />
+                </label>
+                <label className="block text-right text-sm font-medium text-slate-700">
+                  رقم الهاتف
+                  <input
+                    value={formState.phone}
+                    onChange={(event) => setFormState((prev) => ({ ...prev, phone: event.target.value }))}
+                    className="mt-2 w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
+                    type="tel"
+                  />
+                </label>
+                <label className="block text-right text-sm font-medium text-slate-700">
+                  الوظيفة
+                  <input
+                    value={formState.role}
+                    onChange={(event) => setFormState((prev) => ({ ...prev, role: event.target.value }))}
+                    className="mt-2 w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
+                    required
+                  />
+                </label>
+                <label className="block text-right text-sm font-medium text-slate-700">
+                  نوع التعاقد
+                  <select
+                    value={formState.payType}
+                    onChange={(event) => setFormState((prev) => ({ ...prev, payType: event.target.value as StaffPayType }))}
+                    className="mt-2 w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
+                  >
+                    <option value="hour">بالساعة</option>
+                    <option value="fixed">راتب ثابت</option>
+                    <option value="percent">نسبة</option>
+                  </select>
+                </label>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="block text-right text-sm font-medium text-slate-700">
+                    القيمة
+                    <input
+                      value={formState.rate}
+                      onChange={(event) => setFormState((prev) => ({ ...prev, rate: Number(event.target.value) }))}
+                      className="mt-2 w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
+                      type="number"
+                    />
+                  </label>
+                  <label className="block text-right text-sm font-medium text-slate-700">
+                    الساعات / الإيراد
+                    <input
+                      value={formState.payType === 'percent' ? formState.revenue : formState.hours}
+                      onChange={(event) => {
+                        const value = Number(event.target.value);
+                        setFormState((prev) => ({
+                          ...prev,
+                          hours: prev.payType === 'hour' ? value : prev.hours,
+                          revenue: prev.payType === 'percent' ? value : prev.revenue,
+                        }));
+                      }}
+                      className="mt-2 w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
+                      type="number"
+                      placeholder={formState.payType === 'percent' ? 'إيراد الشهر' : 'عدد الساعات'}
+                    />
+                  </label>
+                </div>
+              </div>
+
+            </form>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4">
+              <button
+                type="button"
+                onClick={closeModal}
+                className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              >
+                إلغاء
+              </button>
+              <button
+                type="submit"
+                form="staffModalForm"
+                className="rounded-2xl bg-sky-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-sky-700"
+              >
+                {editingIndex !== null ? 'حفظ التعديلات' : 'ضيف موظف'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-3">
         <div
@@ -322,130 +429,7 @@ export default function Staff() {
         </div>
       </div>
 
-      <div className="rounded-3xl bg-white p-6 shadow-sm shadow-slate-200 ring-1 ring-slate-200/70">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <p className="text-sm font-semibold text-slate-500">{formTitle}</p>
-            <p className="mt-2 text-sm text-slate-600">كل بيانات التعاقد الأساسية في نموذج واحد.</p>
-          </div>
-          <span className="inline-flex items-center rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700">
-            متصل بالحسابات المالية
-          </span>
-        </div>
-
-        <form id="staffForm" onSubmit={handleSubmit} className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-[1fr_0.75fr]">
-          <div className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="block text-right text-sm font-medium text-slate-700">
-                الاسم الكامل
-                <input
-                  value={formState.name}
-                  onChange={(event) => setFormState((prev) => ({ ...prev, name: event.target.value }))}
-                  className="mt-2 w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
-                  required
-                />
-              </label>
-              <label className="block text-right text-sm font-medium text-slate-700">
-                رقم الهاتف
-                <input
-                  value={formState.phone}
-                  onChange={(event) => setFormState((prev) => ({ ...prev, phone: event.target.value }))}
-                  className="mt-2 w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
-                  type="tel"
-                />
-              </label>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="block text-right text-sm font-medium text-slate-700">
-                الوظيفة
-                <input
-                  value={formState.role}
-                  onChange={(event) => setFormState((prev) => ({ ...prev, role: event.target.value }))}
-                  className="mt-2 w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
-                  required
-                />
-              </label>
-              <label className="block text-right text-sm font-medium text-slate-700">
-                نوع التعاقد
-                <select
-                  value={formState.payType}
-                  onChange={(event) => setFormState((prev) => ({ ...prev, payType: event.target.value as StaffPayType }))}
-                  className="mt-2 w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
-                >
-                  <option value="hour">بالساعة</option>
-                  <option value="fixed">راتب ثابت</option>
-                  <option value="percent">نسبة</option>
-                </select>
-              </label>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="block text-right text-sm font-medium text-slate-700">
-                القيمة
-                <input
-                  value={formState.rate}
-                  onChange={(event) => setFormState((prev) => ({ ...prev, rate: Number(event.target.value) }))}
-                  className="mt-2 w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
-                  type="number"
-                />
-              </label>
-              <label className="block text-right text-sm font-medium text-slate-700">
-                الساعات / الإيراد
-                <input
-                  value={formState.payType === 'percent' ? formState.revenue : formState.hours}
-                  onChange={(event) => {
-                    const value = Number(event.target.value);
-                    setFormState((prev) => ({
-                      ...prev,
-                      hours: prev.payType === 'hour' ? value : prev.hours,
-                      revenue: prev.payType === 'percent' ? value : prev.revenue,
-                    }));
-                  }}
-                  className="mt-2 w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
-                  type="number"
-                  placeholder={formState.payType === 'percent' ? 'إيراد الشهر' : 'عدد الساعات'}
-                />
-              </label>
-            </div>
-          </div>
-
-          <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-            <div className="flex items-center gap-3 text-right">
-              <div className="rounded-2xl bg-slate-900 p-3 text-white">
-                <AppIcon icon={Bell03} className="text-white" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-slate-900">سجل الموظف</p>
-                <p className="mt-1 text-sm text-slate-500">إدارة بيانات التعاقد ومشاركة كود الموظف.</p>
-              </div>
-            </div>
-
-            <div className="mt-6 space-y-3 text-right text-sm text-slate-600">
-              <div>اسم الموظف، الهاتف، والوظيفة يمكن تعديلهم في أي وقت.</div>
-              <div>يمكن تغيير النوع بين بالساعة، راتب ثابت، ونسبة.</div>
-              <div>اضغط حفظ لحفظ البيانات محلياً ومزامنتها لاحقاً.</div>
-            </div>
-
-            <div className="mt-6 flex flex-wrap gap-3">
-              <button type="submit" form="staffForm" className="inline-flex items-center gap-2 rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700">
-                <AppIcon icon={SearchSm} className="text-white" />
-                حفظ
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setEditingIndex(null);
-                  setFormState(buildEmptyForm());
-                }}
-                className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-              >
-                إلغاء
-              </button>
-            </div>
-          </div>
-        </form>
-      </div>
+     
 
       <div className="space-y-6">
         <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm shadow-slate-200/50">
@@ -532,17 +516,7 @@ export default function Staff() {
 
         <div className="rounded-3xl bg-white p-6 shadow-sm shadow-slate-200 ring-1 ring-slate-200/70">
           <div className="grid gap-6">
-            <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-              <div className="flex items-center gap-3">
-                <div className="rounded-2xl bg-slate-900 p-3 text-white">
-                  <AppIcon icon={Gift02} className="text-white" />
-                </div>
-                <div>
-                  <h3 className="text-base font-semibold text-slate-900">معلومات سريعة</h3>
-                  <p className="mt-1 text-sm text-slate-500">يمكنك تعديل الحقول مباشرة أو استخدام نموذج الإضافة.</p>
-                </div>
-              </div>
-            </div>
+            
 
             <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
               <h3 className="text-base font-semibold text-slate-900">إحصائيات أساسية</h3>

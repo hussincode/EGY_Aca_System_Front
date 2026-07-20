@@ -32,6 +32,16 @@ function buildEmptyForm(): Ambassador {
   };
 }
 
+function normalizeAmbassadorFromApi(row: Record<string, unknown> | null | undefined): Ambassador | null {
+  if (!row) return null;
+  return {
+    AmbName: String(row.name || row.AmbName || ''),
+    AmbPhone: String(row.phone || row.AmbPhone || ''),
+    RefCode: String(row.ref_code || row.RefCode || ''),
+    Ambstatus: (String(row.status || row.Ambstatus || 'Active') === 'inactive' ? 'Inactive' : 'Active') as 'Active' | 'Inactive',
+  };
+}
+
 export default function Ambassadors() {
   const [ambassadors, setAmbassadors] = useState<Ambassador[]>(() =>
     readStoredData<Ambassador[]>('ambassadors', [])
@@ -49,6 +59,29 @@ export default function Ambassadors() {
   const [form, setForm] = useState<Ambassador>(buildEmptyForm);
   const [isPlayersModalOpen, setIsPlayersModalOpen] = useState(false);
   const [selectedAmbassadorId, setSelectedAmbassadorId] = useState<string | null>(null);
+
+  // Load from API on mount
+  useEffect(() => {
+    const loadFromApi = async () => {
+      const api = window.api;
+      if (!api?.getAmbassadors || !api?.getToken?.()) return;
+
+      try {
+        const response = await api.getAmbassadors();
+        const serverData = Array.isArray(response?.data) ? response.data as Record<string, unknown>[] : [];
+        if (serverData.length > 0) {
+          const mapped = serverData.map((item) => normalizeAmbassadorFromApi(item)).filter(Boolean) as Ambassador[];
+          if (mapped.length > 0) {
+            setAmbassadors(mapped);
+            window.localStorage.setItem('ambassadors', JSON.stringify(mapped));
+          }
+        }
+      } catch {
+        // fallback to localStorage
+      }
+    };
+    loadFromApi();
+  }, []);
 
   useEffect(() => {
     window.localStorage.setItem('ambassadors', JSON.stringify(ambassadors));
@@ -179,7 +212,7 @@ export default function Ambassadors() {
     setForm(buildEmptyForm());
   }
 
-  function saveAmbassador() {
+  async function saveAmbassador() {
     const name = form.AmbName.trim();
     const phone = form.AmbPhone.trim();
 
@@ -195,19 +228,65 @@ export default function Ambassadors() {
       Ambstatus: form.Ambstatus,
     };
 
-    if (editingIndex !== null) {
-      setAmbassadors((prev) =>
-        prev.map((ambassador, index) => (index === editingIndex ? payload : ambassador))
-      );
-    } else {
-      setAmbassadors((prev) => [...prev, payload]);
-    }
+    try {
+      const api = window.api;
+      const editingAmbassador = editingIndex !== null ? ambassadors[editingIndex] : null;
 
-    closeModal();
+      if (api?.getToken?.() && editingAmbassador) {
+        // Update via API
+        if (api.updateAmbassador) {
+          await api.updateAmbassador(editingAmbassador.RefCode, {
+            name: payload.AmbName,
+            phone: payload.AmbPhone,
+            status: payload.Ambstatus === 'Active' ? 'active' : 'inactive',
+          });
+        }
+      } else if (api?.getToken?.() && !editingAmbassador) {
+        // Create via API
+        if (api.createAmbassador) {
+          await api.createAmbassador({
+            name: payload.AmbName,
+            phone: payload.AmbPhone,
+            notes: `RefCode: ${payload.RefCode}`,
+          });
+        }
+      }
+
+      if (editingIndex !== null) {
+        setAmbassadors((prev) =>
+          prev.map((ambassador, index) => (index === editingIndex ? payload : ambassador))
+        );
+      } else {
+        setAmbassadors((prev) => [...prev, payload]);
+      }
+
+      closeModal();
+    } catch (error) {
+      console.error('Failed to save ambassador via API, saving locally', error);
+      if (editingIndex !== null) {
+        setAmbassadors((prev) =>
+          prev.map((ambassador, index) => (index === editingIndex ? payload : ambassador))
+        );
+      } else {
+        setAmbassadors((prev) => [...prev, payload]);
+      }
+      closeModal();
+    }
   }
 
-  function deleteAmbassador(index: number) {
+  async function deleteAmbassador(index: number) {
     if (!window.confirm('متأكد من حذف هذا السفير؟')) return;
+    
+    try {
+      const api = window.api;
+      const ambassador = ambassadors[index];
+      if (api?.getToken?.() && api.deleteAmbassador) {
+        await api.deleteAmbassador(ambassador.RefCode);
+      }
+    } catch (error) {
+      console.error('Failed to delete ambassador via API', error);
+    }
+    
     setAmbassadors((prev) => prev.filter((_, itemIndex) => itemIndex !== index));
   }
 

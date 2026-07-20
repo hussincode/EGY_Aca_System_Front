@@ -3,16 +3,19 @@ import { useEffect, useMemo, useState } from 'react';
 type Game = {
   id: string;
   name: string;
+  description?: string;
+  active?: boolean;
+  created_at?: string;
   icon?: string;
 };
 
 type GameFormState = {
   name: string;
+  description: string;
+  active: boolean;
   icon: string;
 };
 
-const GAMES_KEY = 'games';
-const PLAYERS_KEY = 'players';
 const DEFAULT_ICON = 'fa-solid fa-futbol';
 
 const sportsIcons = [
@@ -39,7 +42,6 @@ function readStoredData<T>(key: string, fallback: T): T {
   if (typeof window === 'undefined') return fallback;
   const stored = window.localStorage.getItem(key);
   if (!stored) return fallback;
-
   try {
     return JSON.parse(stored) as T;
   } catch {
@@ -50,7 +52,6 @@ function readStoredData<T>(key: string, fallback: T): T {
 function dedupeGames(items: Game[]): Game[] {
   const seen = new Map<string, Game>();
   const unique: Game[] = [];
-
   items.forEach((game) => {
     const key = (game.name || '').trim().toLowerCase();
     if (!key) return;
@@ -59,29 +60,47 @@ function dedupeGames(items: Game[]): Game[] {
       unique.push(game);
     }
   });
-
   return unique;
 }
 
 export default function Games() {
-  const [games, setGames] = useState<Game[]>(() => dedupeGames(readStoredData<Game[]>(GAMES_KEY, [])));
-  const [players, setPlayers] = useState<Array<{ game?: string }>>(() => readStoredData<Array<{ game?: string }>>(PLAYERS_KEY, []));
+  const [games, setGames] = useState<Game[]>(() => dedupeGames(readStoredData<Game[]>('games', [])));
+  const [players] = useState<Array<{ game?: string }>>(() => readStoredData<Array<{ game?: string }>>('players', []));
   const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingGameId, setEditingGameId] = useState<string | null>(null);
-  const [formState, setFormState] = useState<GameFormState>({ name: '', icon: DEFAULT_ICON });
+  const [formState, setFormState] = useState<GameFormState>({ name: '', description: '', active: true, icon: DEFAULT_ICON });
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    window.localStorage.setItem(GAMES_KEY, JSON.stringify(games));
+    window.localStorage.setItem('games', JSON.stringify(games));
   }, [games]);
 
   useEffect(() => {
-    const onStorage = () => {
-      setGames(dedupeGames(readStoredData<Game[]>(GAMES_KEY, [])));
-      setPlayers(readStoredData<Array<{ game?: string }>>(PLAYERS_KEY, []));
+    const loadFromApi = async () => {
+      if (!window.api?.getToken?.()) return;
+      setLoading(true);
+      try {
+        const response = await window.api.getGames();
+        const apiGames = Array.isArray(response?.data) ? (response.data as Game[]) : [];
+        if (apiGames.length) {
+          setGames(dedupeGames(apiGames));
+          window.localStorage.setItem('games', JSON.stringify(apiGames));
+        }
+      } catch {
+        // fallback to localStorage
+      } finally {
+        setLoading(false);
+      }
     };
+    loadFromApi();
+  }, []);
 
+  useEffect(() => {
+    const onStorage = () => {
+      setGames(dedupeGames(readStoredData<Game[]>('games', [])));
+    };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
   }, []);
@@ -94,56 +113,89 @@ export default function Games() {
 
   const openAddModal = () => {
     setEditingGameId(null);
-    setFormState({ name: '', icon: DEFAULT_ICON });
+    setFormState({ name: '', description: '', active: true, icon: DEFAULT_ICON });
     setIsModalOpen(true);
   };
 
   const openEditModal = (game: Game) => {
     setEditingGameId(game.id);
-    setFormState({ name: game.name, icon: game.icon || DEFAULT_ICON });
+    setFormState({
+      name: game.name,
+      description: game.description || '',
+      active: game.active !== false,
+      icon: game.icon || DEFAULT_ICON,
+    });
     setIsModalOpen(true);
   };
 
   const closeModal = () => {
     setIsModalOpen(false);
     setEditingGameId(null);
-    setFormState({ name: '', icon: DEFAULT_ICON });
+    setFormState({ name: '', description: '', active: true, icon: DEFAULT_ICON });
   };
 
-  const saveGame = () => {
+  const saveGame = async () => {
     const trimmedName = formState.name.trim();
-
     if (!trimmedName) {
       window.alert('يرجى إدخال اسم اللعبة');
       return;
     }
 
-    const existingIndex = games.findIndex((game) => game.name.trim().toLowerCase() === trimmedName.toLowerCase());
-    const payload: Game = {
-      id: editingGameId || existingIndex >= 0 ? games[existingIndex].id : `game_${Date.now()}`,
-      name: trimmedName,
-      icon: formState.icon || DEFAULT_ICON,
-    };
-
-    setGames((prev) => {
-      if (editingGameId) {
-        return prev.map((game) => (game.id === editingGameId ? payload : game));
+    try {
+      if (window.api?.getToken()) {
+        if (editingGameId) {
+          const response = await window.api.updateGame(editingGameId, {
+            name: trimmedName,
+            description: formState.description || '',
+            active: formState.active,
+          });
+          const updated = (response as { data?: Game })?.data;
+          if (updated) {
+            setGames((prev) => prev.map((g) => (g.id === editingGameId ? { ...updated, icon: formState.icon } : g)));
+          }
+        } else {
+          const response = await window.api.createGame({
+            name: trimmedName,
+            description: formState.description || '',
+            active: formState.active,
+          });
+          const created = (response as { data?: Game })?.data;
+          if (created) {
+            setGames((prev) => [...prev, { ...created, icon: formState.icon }]);
+          }
+        }
+      } else {
+        // Local fallback
+        const existingIndex = games.findIndex((g) => g.name.trim().toLowerCase() === trimmedName.toLowerCase());
+        const payload: Game = {
+          id: editingGameId || (existingIndex >= 0 ? games[existingIndex].id : `game_${Date.now()}`),
+          name: trimmedName,
+          description: formState.description || '',
+          active: formState.active,
+          icon: formState.icon || DEFAULT_ICON,
+        };
+        setGames((prev) => {
+          if (editingGameId) return prev.map((g) => (g.id === editingGameId ? payload : g));
+          if (existingIndex >= 0) return prev.map((g) => (g.name.trim().toLowerCase() === trimmedName.toLowerCase() ? payload : g));
+          return [...prev, payload];
+        });
       }
-
-      if (existingIndex >= 0) {
-        return prev.map((game) => (game.name.trim().toLowerCase() === trimmedName.toLowerCase() ? payload : game));
-      }
-
-      return [...prev, payload];
-    });
-
-    closeModal();
+      closeModal();
+    } catch (error) {
+      window.alert('فشل حفظ اللعبة: ' + (error as Error).message);
+    }
   };
 
-  const deleteGame = (gameId: string) => {
+  const deleteGame = async (gameId: string) => {
     if (!window.confirm('هل تريد حذف هذه اللعبة؟')) return;
-    const nextGames = games.filter((game) => game.id !== gameId);
-    setGames(nextGames);
+    try {
+      if (window.api?.getToken()) {
+        await window.api.deleteGame(gameId);
+      }
+      setGames((prev) => prev.filter((game) => game.id !== gameId));
+    } catch (error) {
+      window.alert('فشل حذف اللعبة: ' + (error as Error).message);
+    }
   };
 
   return (
@@ -153,6 +205,7 @@ export default function Games() {
           <div>
             <p className="text-sm text-slate-500">إدارة الألعاب</p>
             <h1 className="mt-2 text-3xl font-semibold text-slate-900">الألعاب</h1>
+            {loading && <span className="text-sm text-sky-600">جاري التحميل...</span>}
           </div>
           <div className="flex gap-3">
             <input
@@ -179,6 +232,8 @@ export default function Games() {
               <tr>
                 <th className="px-4 py-3 text-right">الأيقونة</th>
                 <th className="px-4 py-3 text-right">اسم اللعبة</th>
+                <th className="px-4 py-3 text-right">الوصف</th>
+                <th className="px-4 py-3 text-right">الحالة</th>
                 <th className="px-4 py-3 text-right">عدد اللاعبين</th>
                 <th className="px-4 py-3 text-center">الإجراءات</th>
               </tr>
@@ -186,7 +241,7 @@ export default function Games() {
             <tbody className="divide-y divide-slate-200 bg-white">
               {filteredGames.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-4 py-8 text-center text-slate-500">
+                  <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
                     لا توجد ألعاب
                   </td>
                 </tr>
@@ -199,6 +254,12 @@ export default function Games() {
                         <i className={game.icon || DEFAULT_ICON} />
                       </td>
                       <td className="px-4 py-3 font-semibold text-slate-900">{game.name}</td>
+                      <td className="px-4 py-3 text-slate-600">{game.description || '-'}</td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${game.active !== false ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                          {game.active !== false ? 'نشط' : 'غير نشط'}
+                        </span>
+                      </td>
                       <td className="px-4 py-3 text-slate-600">{playersCount}</td>
                       <td className="px-4 py-3">
                         <div className="flex justify-center gap-2">
@@ -237,6 +298,23 @@ export default function Games() {
                   className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-right"
                 />
               </label>
+              <label className="block space-y-2 text-sm text-slate-700">
+                الوصف
+                <textarea
+                  value={formState.description}
+                  onChange={(event) => setFormState((prev) => ({ ...prev, description: event.target.value }))}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-right min-h-[80px]"
+                />
+              </label>
+              <label className="flex items-center gap-3 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={formState.active}
+                  onChange={(event) => setFormState((prev) => ({ ...prev, active: event.target.checked }))}
+                  className="h-4 w-4"
+                />
+                نشط
+              </label>
 
               <div>
                 <p className="mb-3 text-sm text-slate-700">اختر أيقونة اللعبة</p>
@@ -270,3 +348,4 @@ export default function Games() {
     </div>
   );
 }
+

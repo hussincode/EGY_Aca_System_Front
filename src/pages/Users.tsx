@@ -141,6 +141,24 @@ function createId(prefix = 'user') {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function normalizeUserFromApi(row: Record<string, unknown> | null | undefined): UserRecord | null {
+  if (!row) return null;
+  return {
+    id: String(row.id || row._id || ''),
+    name: String(row.name || ''),
+    phone: String(row.phone || ''),
+    photo: String(row.photo || ''),
+    email: String(row.email || ''),
+    role: normalizeRole(String(row.role || '')),
+    branch: String(row.branchId || row.branch_id || row.branch || ''), // branch UUID from API
+    branchName: String(row.branchName || row.branch || ''),
+    active: row.active !== false,
+    access: Array.isArray(row.access) ? row.access as string[] : [],
+    permissions: Array.isArray(row.permissions) ? row.permissions as string[] : [],
+    lastLogin: String(row.lastLogin || ''),
+  };
+}
+
 export default function UsersPage() {
   const [users, setUsers] = useState<UserRecord[]>(() => readJson('users', []));
   const [branches] = useState<Branch[]>(() => {
@@ -155,11 +173,28 @@ export default function UsersPage() {
   const [form, setForm] = useState<UserFormState>(initialForm);
   const [photoPreview, setPhotoPreview] = useState<string>(logo);
 
+  // Load from API on mount
   useEffect(() => {
-    if (!toast) return;
-    const timer = window.setTimeout(() => setToast(null), 2400);
-    return () => window.clearTimeout(timer);
-  }, [toast]);
+    const loadFromApi = async () => {
+      const api = window.api;
+      if (!api?.getUsers || !api?.getToken?.()) return;
+
+      try {
+        const response = await api.getUsers() as { data?: unknown[] };
+        const serverData = Array.isArray(response?.data) ? response.data as Record<string, unknown>[] : [];
+        if (serverData.length > 0) {
+          const mapped = serverData.map((item) => normalizeUserFromApi(item)).filter(Boolean) as UserRecord[];
+          if (mapped.length > 0) {
+            setUsers(mapped);
+            writeJson('users', mapped);
+          }
+        }
+      } catch {
+        // fallback to localStorage
+      }
+    };
+    loadFromApi();
+  }, []);
 
   useEffect(() => {
     writeJson('users', users);
@@ -203,7 +238,12 @@ export default function UsersPage() {
     setIsModalOpen(true);
   };
 
-  const closeModal = () => setIsModalOpen(false);
+  const closeModal = () => {
+    setIsModalOpen(false);
+    setForm({ ...initialForm, role: 'manager', access: roleDefaults.manager.access, permissions: roleDefaults.manager.permissions });
+    setEditingId(null);
+    setPhotoPreview(logo);
+  };
 
   const handlePhotoChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -222,7 +262,7 @@ export default function UsersPage() {
     setForm((prev) => ({ ...prev, role, access: defaults.access, permissions: defaults.permissions }));
   };
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     if (!form.name.trim() || !form.email.trim()) {
@@ -256,16 +296,60 @@ export default function UsersPage() {
       ...(form.password.trim() ? { password: form.password.trim() } : {}),
     };
 
-    if (editingId) {
-      setUsers((prev) => prev.map((item) => (item.id === editingId ? { ...item, ...nextUser, active: item.active !== false } : item)));
-    } else {
-      setUsers((prev) => [nextUser, ...prev]);
-    }
+    try {
+      const api = window.api;
+      const token = api?.getToken?.();
 
-    setIsModalOpen(false);
-    setForm({ ...initialForm, role: 'manager', access: roleDefaults.manager.access, permissions: roleDefaults.manager.permissions });
-    setPhotoPreview(logo);
-    showToast('تم حفظ المستخدم بنجاح', 'success');
+      if (token) {
+        if (editingId) {
+          if (api?.updateUser) {
+            await api.updateUser(editingId, {
+              name: nextUser.name,
+              email: nextUser.email,
+              role: nextUser.role,
+              branch_id: nextUser.branch || null,
+              ...(nextUser.password ? { password: nextUser.password } : {}),
+            });
+          }
+        } else {
+          // Create new user via auth/register API
+          if (api?.register) {
+            const result = await api.register({
+              name: nextUser.name,
+              email: nextUser.email,
+              password: form.password.trim(),
+              role: nextUser.role,
+              branch_id: nextUser.branch || undefined,
+            }) as { data?: { id?: string } } | undefined;
+            if (result?.data?.id) {
+              nextUser.id = String(result.data.id);
+            }
+          }
+        }
+      }
+
+      if (editingId) {
+        setUsers((prev) => prev.map((item) => (item.id === editingId ? { ...item, ...nextUser, active: item.active !== false } : item)));
+      } else {
+        setUsers((prev) => [nextUser, ...prev]);
+      }
+
+      setIsModalOpen(false);
+      setForm({ ...initialForm, role: 'manager', access: roleDefaults.manager.access, permissions: roleDefaults.manager.permissions });
+      setPhotoPreview(logo);
+      showToast('تم حفظ المستخدم بنجاح', 'success');
+    } catch (error) {
+      console.error('Failed to save user via API, saving locally', error);
+      if (editingId) {
+        setUsers((prev) => prev.map((item) => (item.id === editingId ? { ...item, ...nextUser, active: item.active !== false } : item)));
+      } else {
+        setUsers((prev) => [nextUser, ...prev]);
+      }
+      setIsModalOpen(false);
+      setForm({ ...initialForm, role: 'manager', access: roleDefaults.manager.access, permissions: roleDefaults.manager.permissions });
+      setPhotoPreview(logo);
+      showToast('تم حفظ المستخدم محلياً', 'success');
+    }
   };
 
   const toggleStatus = (id: string) => {
@@ -273,8 +357,18 @@ export default function UsersPage() {
     showToast('تم تحديث حالة المستخدم', 'success');
   };
 
-  const deleteUser = (id: string) => {
+  const deleteUser = async (id: string) => {
     if (!window.confirm('حذف المستخدم؟')) return;
+
+    try {
+      const api = window.api;
+      if (api?.getToken?.() && api.deleteUser) {
+        await api.deleteUser(id);
+      }
+    } catch (error) {
+      console.error('Failed to delete user via API', error);
+    }
+
     setUsers((prev) => prev.filter((user) => user.id !== id));
     showToast('تم حذف المستخدم', 'success');
   };
@@ -445,65 +539,65 @@ export default function UsersPage() {
         </div>
       </div>
 
-      {isModalOpen ? (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4">
-          <div className="w-full max-w-5xl rounded-3xl bg-white p-6 shadow-2xl">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-xl font-semibold text-slate-900">{editingId ? 'تعديل مستخدم' : 'إضافة مستخدم'}</h3>
-              <button type="button" onClick={closeModal} className="text-slate-500">✕</button>
+{isModalOpen ? (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-2 sm:p-4">
+          <div className="flex max-h-[95vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl sm:rounded-3xl sm:p-5">
+            <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-4 py-3 sm:mb-3 sm:border-0 sm:px-0 sm:py-0">
+              <h3 className="text-base font-semibold text-slate-900 sm:text-lg">{editingId ? 'تعديل مستخدم' : 'إضافة مستخدم'}</h3>
+              <button type="button" onClick={closeModal} className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100">✕</button>
             </div>
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                <div className="text-center md:col-span-2 lg:col-span-3">
-                  <label className="inline-flex cursor-pointer flex-col items-center gap-2">
-                    <img src={photoPreview || logo} alt="preview" className="h-20 w-20 rounded-full border border-slate-200 object-cover" />
-                    <span className="rounded-full bg-sky-600 px-3 py-1 text-sm text-white">رفع صورة</span>
+            <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto space-y-3 px-4 py-3 sm:space-y-4 sm:px-0 sm:py-0">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="text-center sm:col-span-2">
+                  <label className="inline-flex cursor-pointer flex-col items-center gap-1">
+                    <img src={photoPreview || logo} alt="preview" className="h-14 w-14 rounded-full border border-slate-200 object-cover" />
+                    <span className="rounded-full bg-sky-600 px-2 py-0.5 text-xs text-white">رفع صورة</span>
                     <input type="file" accept="image/*" onChange={handlePhotoChange} className="hidden" />
                   </label>
                 </div>
 
-                <label className="block text-sm text-slate-700">
+                <label className="block text-xs text-slate-700">
                   الاسم
-                  <input value={form.name} onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))} className="mt-2 w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none" required />
+                  <input value={form.name} onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))} className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-1.5 text-sm outline-none" required />
                 </label>
-                <label className="block text-sm text-slate-700">
+                <label className="block text-xs text-slate-700">
                   رقم الهاتف
-                  <input value={form.phone} onChange={(event) => setForm((prev) => ({ ...prev, phone: event.target.value }))} className="mt-2 w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none" placeholder="اختياري" />
+                  <input value={form.phone} onChange={(event) => setForm((prev) => ({ ...prev, phone: event.target.value }))} className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-1.5 text-sm outline-none" placeholder="اختياري" />
                 </label>
-                <label className="block text-sm text-slate-700">
+                <label className="block text-xs text-slate-700">
                   البريد
-                  <input type="email" value={form.email} onChange={(event) => setForm((prev) => ({ ...prev, email: event.target.value }))} className="mt-2 w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none" required />
+                  <input type="email" value={form.email} onChange={(event) => setForm((prev) => ({ ...prev, email: event.target.value }))} className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-1.5 text-sm outline-none" required />
                 </label>
-                <label className="block text-sm text-slate-700">
+                <label className="block text-xs text-slate-700">
                   كلمة المرور
-                  <input type="password" value={form.password} onChange={(event) => setForm((prev) => ({ ...prev, password: event.target.value }))} className="mt-2 w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none" placeholder={editingId ? 'اتركها فارغة للإبقاء على الحالية' : ''} />
+                  <input type="password" value={form.password} onChange={(event) => setForm((prev) => ({ ...prev, password: event.target.value }))} className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-1.5 text-sm outline-none" placeholder={editingId ? 'اتركها فارغة' : ''} />
                 </label>
-                <label className="block text-sm text-slate-700">
+                <label className="block text-xs text-slate-700">
                   الدور
-                  <select value={form.role} onChange={(event) => applyRoleDefaults(event.target.value as UserRole)} className="mt-2 w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none">
+                  <select value={form.role} onChange={(event) => applyRoleDefaults(event.target.value as UserRole)} className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-1.5 text-sm outline-none">
                     <option value="admin">Admin</option>
                     <option value="manager">Manager</option>
                     <option value="coach">Coach</option>
                     <option value="accountant">Accountant</option>
                   </select>
                 </label>
-                <label className="block text-sm text-slate-700">
+                <label className="block text-xs text-slate-700">
                   الفرع
-                  <select value={form.branch} onChange={(event) => setForm((prev) => ({ ...prev, branch: event.target.value }))} className="mt-2 w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none">
+                  <select value={form.branch} onChange={(event) => setForm((prev) => ({ ...prev, branch: event.target.value }))} className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-1.5 text-sm outline-none">
                     <option value="">كل الفروع</option>
                     {branches.map((branch) => (
-                      <option key={branch.id || branch.name} value={branch.name || ''}>{branch.name}</option>
+                      <option key={branch.id || branch.name} value={branch.id || branch.name || ''}>{branch.name}</option>
                     ))}
                   </select>
                 </label>
               </div>
 
-              <div className="grid gap-6 lg:grid-cols-2">
-                <div className="rounded-2xl border border-slate-200 p-4">
-                  <h4 className="mb-3 font-semibold text-slate-900">صلاحيات الوصول للصفحات</h4>
-                  <div className="space-y-2">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl border border-slate-200 p-3">
+                  <h4 className="mb-2 text-xs font-semibold text-slate-900">صلاحيات الوصول للصفحات</h4>
+                  <div className="space-y-1">
                     {accessOptions.map((access) => (
-                      <label key={access.value} className="flex items-center gap-2 text-sm text-slate-700">
+                      <label key={access.value} className="flex items-center gap-2 text-xs text-slate-700">
                         <input
                           type="checkbox"
                           checked={form.access.includes(access.value)}
@@ -520,15 +614,15 @@ export default function UsersPage() {
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-slate-200 p-4">
-                  <h4 className="mb-3 font-semibold text-slate-900">صلاحيات العمليات</h4>
-                  <div className="max-h-80 space-y-4 overflow-auto">
+                <div className="rounded-xl border border-slate-200 p-3">
+                  <h4 className="mb-2 text-xs font-semibold text-slate-900">صلاحيات العمليات</h4>
+                  <div className="max-h-48 space-y-2 overflow-auto">
                     {permissionGroups.map((group) => (
                       <div key={group.title}>
-                        <div className="mb-2 text-sm font-semibold text-sky-700">{group.title}</div>
-                        <div className="space-y-2">
+                        <div className="mb-1 text-xs font-semibold text-sky-700">{group.title}</div>
+                        <div className="space-y-1">
                           {group.values.map((value) => (
-                            <label key={value} className="flex items-center gap-2 text-sm text-slate-700">
+                            <label key={value} className="flex items-center gap-2 text-xs text-slate-700">
                               <input
                                 type="checkbox"
                                 checked={form.permissions.includes(value)}
@@ -549,11 +643,11 @@ export default function UsersPage() {
                 </div>
               </div>
 
-              <div className="flex justify-end gap-3">
-                <button type="button" onClick={closeModal} className="rounded-2xl border border-slate-300 px-4 py-2 text-sm text-slate-700">
+              <div className="sticky bottom-0 flex justify-end gap-2 border-t border-slate-100 bg-white pb-1 pt-3 sm:border-0 sm:pb-0 sm:pt-0">
+                <button type="button" onClick={closeModal} className="rounded-xl border border-slate-300 px-3 py-1.5 text-xs text-slate-700">
                   إلغاء
                 </button>
-                <button type="submit" className="rounded-2xl bg-sky-600 px-4 py-2 text-sm font-medium text-white">
+                <button type="submit" className="rounded-xl bg-sky-600 px-3 py-1.5 text-xs font-medium text-white">
                   حفظ
                 </button>
               </div>

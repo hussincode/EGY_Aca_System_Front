@@ -114,6 +114,46 @@ function formatPlayerBarcodeValue(sequence: number) {
   return `EGY${String(sequence).padStart(6, '0')}`;
 }
 
+function toSqlDate(value?: string) {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const date = new Date(trimmed);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().split('T')[0];
+}
+
+function isValidGuid(value?: string | null) {
+  if (!value) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function normalizePlayerFromApi(row: Record<string, unknown> | null | undefined): Player | null {
+  if (!row) return null;
+  const id = String(row.id || `player_${Date.now()}`);
+  const status = String(row.status || 'due');
+  return {
+    id,
+    name: String(row.name || ''),
+    age: row.age != null ? Number(row.age) : undefined,
+    phone: String(row.phone || ''),
+    game: String((row as Record<string, unknown>).game_name || row.game || ''),
+    branch: String((row as Record<string, unknown>).branch_name || row.branch || ''),
+    status: status === 'paid' ? 'paid' : 'due',
+    ambId: String((row as Record<string, unknown>).amb_ref_code || row.ambId || ''),
+    photo: String(row.photo || ''),
+    schedule: String(row.schedule || ''),
+    memberType: (row.member_type as Player['memberType']) || 'none',
+    memberId: String(row.member_id || ''),
+    memberExpiry: String(row.member_expiry || ''),
+    memberValue: row.member_value != null ? Number(row.member_value) : 0,
+    playerSerial: String(row.player_serial || ''),
+    playerBarcodeValue: String((row as Record<string, unknown>).playerBarcodeValue || ''),
+    joined: row.joined === true || row.joined === 1,
+    joinDate: String(row.join_date || ''),
+  };
+}
+
 export default function Players() {
   const [players, setPlayers] = useState<Player[]>(() => readStoredData('players', []));
   const [branches, setBranches] = useState<Branch[]>(() => readStoredData('branches', []));
@@ -191,6 +231,28 @@ export default function Players() {
     const timeout = window.setTimeout(() => setToastMessage(null), 2500);
     return () => window.clearTimeout(timeout);
   }, [toastMessage]);
+
+  useEffect(() => {
+    const loadPlayersFromApi = async () => {
+      if (!window.api?.getPlayers || !window.api.getToken?.()) return;
+
+      try {
+        const response = await window.api.getPlayers();
+        const serverPlayers = Array.isArray(response?.data) ? response.data : [];
+        const nextPlayers = serverPlayers
+          .map((item) => normalizePlayerFromApi(item as Record<string, unknown> | null | undefined))
+          .filter((item): item is Player => Boolean(item));
+
+        if (nextPlayers.length) {
+          setPlayers(nextPlayers);
+        }
+      } catch (error) {
+        console.error('Failed to load players from API', error);
+      }
+    };
+
+    void loadPlayersFromApi();
+  }, []);
 
   const activeSubscriptionPlayerSet = useMemo(() => {
     const set = new Set<string>();
@@ -320,7 +382,7 @@ export default function Players() {
     };
   };
 
-  const handleSavePlayer = () => {
+  const handleSavePlayer = async () => {
     if (!formState.name.trim()) {
       setFormError('أدخل اسم اللاعب');
       return;
@@ -333,7 +395,7 @@ export default function Players() {
     setFormError(null);
 
     const playerPayload: Player = {
-      id: currentPlayerId || Date.now().toString(),
+      id: currentPlayerId && isValidGuid(currentPlayerId) ? currentPlayerId : Date.now().toString(),
       name: formState.name.trim(),
       age: formState.age,
       phone: formState.phone.trim(),
@@ -359,34 +421,88 @@ export default function Players() {
     };
 
     const normalized = ensurePlayerIdentity(playerPayload);
-
-    if (currentPlayerId) {
-      setPlayers((prev) => prev.map((player) => (player.id === currentPlayerId ? normalized : player)));
-    } else {
-      setPlayers((prev) => [...prev, normalized]);
-    }
-
     const selectedAmbassadorId = formState.ambId.trim();
-    setAmbassadorReferrals((prev) => {
-      const updated = prev.filter((entry) => entry.playerId !== normalized.id);
-      if (selectedAmbassadorId) {
-        updated.push(buildAmbassadorReferral(normalized, selectedAmbassadorId));
-      }
-      return updated;
-    });
+    const selectedGame = games.find((game) => game.name === formState.game);
+    const selectedBranch = branches.find((branch) => branch.name === formState.branch);
+    const payloadToSend = {
+      playerSerial: normalized.playerSerial,
+      name: normalized.name,
+      age: normalized.age != null && normalized.age !== 0 ? normalized.age : null,
+      phone: normalized.phone || null,
+      game_id: selectedGame?.id && isValidGuid(selectedGame.id) ? selectedGame.id : null,
+      branch_id: selectedBranch?.id && isValidGuid(selectedBranch.id) ? selectedBranch.id : null,
+      status: normalized.status || 'due',
+      photo: normalized.photo || null,
+      schedule: normalized.schedule || null,
+      member_type: normalized.memberType || 'none',
+      member_id: normalized.memberId || null,
+      member_expiry: toSqlDate(normalized.memberExpiry || ''),
+      member_value: Number(normalized.memberValue || 0),
+      amb_ref_code: selectedAmbassadorId || null,
+      joined: normalized.joined === true,
+      join_date: toSqlDate(normalized.joinDate || ''),
+    };
 
-    setToastMessage('تم حفظ اللاعب بنجاح');
-    handleClosePlayerModal();
+    try {
+      let savedPlayer: Player = normalized;
+      const shouldUpdateExisting = Boolean(currentPlayerId && isValidGuid(currentPlayerId));
+
+      if (shouldUpdateExisting && currentPlayerId) {
+        if (window.api?.updatePlayer) {
+          const response = await window.api.updatePlayer(currentPlayerId, payloadToSend);
+          const serverPlayer = normalizePlayerFromApi((response as { data?: Record<string, unknown> } | undefined)?.data as Record<string, unknown> | null | undefined);
+          if (serverPlayer) {
+            savedPlayer = serverPlayer;
+          }
+        }
+        setPlayers((prev) => prev.map((player) => (player.id === currentPlayerId ? savedPlayer : player)));
+      } else {
+        if (window.api?.createPlayer) {
+          const response = await window.api.createPlayer(payloadToSend);
+          const serverPlayer = normalizePlayerFromApi((response as { data?: Record<string, unknown> } | undefined)?.data as Record<string, unknown> | null | undefined);
+          if (serverPlayer) {
+            savedPlayer = serverPlayer;
+          }
+        }
+        setPlayers((prev) => [...prev, savedPlayer]);
+      }
+
+      setAmbassadorReferrals((prev) => {
+        const updated = prev.filter((entry) => entry.playerId !== savedPlayer.id);
+        if (selectedAmbassadorId) {
+          updated.push(buildAmbassadorReferral(savedPlayer, selectedAmbassadorId));
+        }
+        return updated;
+      });
+
+      setToastMessage('تم حفظ اللاعب بنجاح');
+      handleClosePlayerModal();
+    } catch (error) {
+      console.error('Failed to save player through API', error);
+      setFormError((error as Error)?.message || 'تعذر حفظ اللاعب');
+    }
   };
 
-  const handleDeletePlayer = (playerId?: string) => {
+  const handleDeletePlayer = async (playerId?: string) => {
     const idToDelete = playerId || currentPlayerId;
     if (!idToDelete) return;
     if (!window.confirm('هل تريد حذف هذا اللاعب؟')) return;
-    setPlayers((prev) => prev.filter((player) => player.id !== idToDelete));
-    setAmbassadorReferrals((prev) => prev.filter((entry) => entry.playerId !== idToDelete));
-    setToastMessage('تم حذف اللاعب');
-    if (!playerId) handleClosePlayerModal();
+
+    try {
+      if (isValidGuid(idToDelete) && window.api?.deletePlayer) {
+        await window.api.deletePlayer(idToDelete);
+      }
+      setPlayers((prev) => prev.filter((player) => player.id !== idToDelete));
+      setAmbassadorReferrals((prev) => prev.filter((entry) => entry.playerId !== idToDelete));
+      setToastMessage('تم حذف اللاعب');
+      if (!playerId) handleClosePlayerModal();
+    } catch (error) {
+      console.error('Failed to delete player through API', error);
+      setPlayers((prev) => prev.filter((player) => player.id !== idToDelete));
+      setAmbassadorReferrals((prev) => prev.filter((entry) => entry.playerId !== idToDelete));
+      setToastMessage('تم حذف اللاعب محلياً');
+      if (!playerId) handleClosePlayerModal();
+    }
   };
 
   const handlePhotoChange = (file?: File) => {

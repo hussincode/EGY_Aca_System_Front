@@ -64,12 +64,55 @@ export default function Dashboard() {
     setFinances(readStoredData('finances', []));
   };
 
+  // Load data from API on mount
+  useEffect(() => {
+    const loadFromApi = async () => {
+      const api = window.api;
+      if (!api?.getToken?.()) return;
+
+      try {
+        const [playersRes, subsRes, financeRes] = await Promise.all([
+          api.getPlayers().catch(() => null),
+          api.getSubscriptions().catch(() => null),
+          api.getFinanceRecords().catch(() => null),
+        ]);
+
+        if (playersRes?.data) {
+          const serverPlayers = Array.isArray(playersRes.data) ? playersRes.data as Player[] : [];
+          if (serverPlayers.length) {
+            setPlayers(serverPlayers);
+            window.localStorage.setItem('players', JSON.stringify(serverPlayers));
+          }
+        }
+        if (subsRes?.data) {
+          const serverSubs = Array.isArray(subsRes.data) ? subsRes.data as Subscription[] : [];
+          if (serverSubs.length) {
+            setSubscriptions(serverSubs);
+            window.localStorage.setItem('subscriptions', JSON.stringify(serverSubs));
+          }
+        }
+        if (financeRes?.data) {
+          const serverFinance = Array.isArray(financeRes.data) ? financeRes.data as FinanceEntry[] : [];
+          if (serverFinance.length) {
+            setFinances(serverFinance);
+            window.localStorage.setItem('finances', JSON.stringify(serverFinance));
+          }
+        }
+      } catch {
+        // fallback to localStorage
+      }
+    };
+    loadFromApi();
+  }, []);
+
   useEffect(() => {
     const onStorage = () => syncStorage();
     window.addEventListener('storage', onStorage);
+    window.addEventListener('app:sync', onStorage);
     const interval = window.setInterval(syncStorage, 60 * 1000);
     return () => {
       window.removeEventListener('storage', onStorage);
+      window.removeEventListener('app:sync', onStorage);
       window.clearInterval(interval);
     };
   }, []);

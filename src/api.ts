@@ -127,6 +127,7 @@ const api = {
 
   request,
 
+  // ========== BRANCHES ==========
   getBranches() {
     return request<ApiResponse<Array<unknown>>>('/branches');
   },
@@ -149,10 +150,30 @@ const api = {
     return request<void>(`/branches/${id}`, { method: 'DELETE' });
   },
 
+  // ========== PLAYERS ==========
   getPlayers() {
     return request<ApiResponse<Array<unknown>>>('/players');
   },
 
+  createPlayer(player: Record<string, any>) {
+    return request<ApiResponse>('/players', {
+      method: 'POST',
+      body: JSON.stringify(player),
+    });
+  },
+
+  updatePlayer(id: string, updates: Record<string, any>) {
+    return request<ApiResponse>(`/players/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(normalizePlayerUpdate(updates)),
+    });
+  },
+
+  deletePlayer(id: string) {
+    return request<void>(`/players/${id}`, { method: 'DELETE' });
+  },
+
+  // ========== SUBSCRIPTIONS ==========
   getSubscriptions() {
     return request<ApiResponse<Array<unknown>>>('/subscriptions');
   },
@@ -179,13 +200,30 @@ const api = {
     return request<void>(`/subscriptions/${id}`, { method: 'DELETE' });
   },
 
-  updatePlayer(id: string, updates: Record<string, any>) {
-    return request<ApiResponse>(`/players/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(normalizePlayerUpdate(updates)),
+  // ========== GAMES ==========
+  getGames() {
+    return request<ApiResponse<Array<unknown>>>('/games');
+  },
+
+  createGame(game: { name: string; description?: string; active?: boolean }) {
+    return request<ApiResponse>('/games', {
+      method: 'POST',
+      body: JSON.stringify(game),
     });
   },
 
+  updateGame(id: string, game: { name: string; description?: string; active?: boolean }) {
+    return request<ApiResponse>(`/games/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(game),
+    });
+  },
+
+  deleteGame(id: string) {
+    return request<void>(`/games/${id}`, { method: 'DELETE' });
+  },
+
+  // ========== FINANCE ==========
   createFinance(record: Record<string, any>) {
     return request<ApiResponse>('/finance', {
       method: 'POST',
@@ -208,10 +246,141 @@ const api = {
     return request<ApiResponse<Array<unknown>>>('/finance');
   },
 
+  updateFinance(id: string, record: Record<string, any>) {
+    return request<ApiResponse>(`/finance/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        type: record.type,
+        category: record.category,
+        branch_id: record.branchId || record.branch_id || null,
+        related_to: record.relatedTo || record.related_to || null,
+        amount: record.amount,
+        date: record.date || new Date().toISOString().split('T')[0],
+        description: record.description || null,
+        source: record.source || null,
+        source_id: record.sourceId || record.source_id || null,
+      }),
+    });
+  },
+
   deleteFinance(id: string) {
     return request<void>(`/finance/${id}`, { method: 'DELETE' });
   },
 
+  // ========== STAFF ==========
+  getStaff() {
+    return request<ApiResponse<Array<unknown>>>('/staff');
+  },
+
+  createStaff(staff: Record<string, any>) {
+    return request<ApiResponse>('/staff', {
+      method: 'POST',
+      body: JSON.stringify(staff),
+    });
+  },
+
+  updateStaff(id: string, staff: Record<string, any>) {
+    return request<ApiResponse>(`/staff/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(staff),
+    });
+  },
+
+  deleteStaff(id: string) {
+    return request<void>(`/staff/${id}`, { method: 'DELETE' });
+  },
+
+  // ========== LEADS ==========
+  getLeads() {
+    return request<ApiResponse<Array<unknown>>>('/leads');
+  },
+
+  createLead(lead: { name: string; phone: string; interest?: string; status?: string; branch_id?: string; notes?: string }) {
+    return request<ApiResponse>('/leads', {
+      method: 'POST',
+      body: JSON.stringify(lead),
+    });
+  },
+
+  updateLead(id: string, lead: Record<string, any>) {
+    return request<ApiResponse>(`/leads/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(lead),
+    });
+  },
+
+  deleteLead(id: string) {
+    return request<void>(`/leads/${id}`, { method: 'DELETE' });
+  },
+
+  // ========== ATTENDANCE ==========
+  getAttendance() {
+    return request<ApiResponse<Array<unknown>>>('/attendance');
+  },
+
+  createAttendance(attendance: { player_id: string; status: string; date?: string; subscription_id?: string }) {
+    return request<ApiResponse>('/attendance', {
+      method: 'POST',
+      body: JSON.stringify(attendance),
+    });
+  },
+
+  updateAttendance(id: string, attendance: Record<string, any>) {
+    return request<ApiResponse>(`/attendance/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(attendance),
+    });
+  },
+
+  deleteAttendance(id: string) {
+    return request<void>(`/attendance/${id}`, { method: 'DELETE' });
+  },
+
+  // ========== AMBASSADORS ==========
+  getAmbassadors() {
+    return request<ApiResponse<Array<unknown>>>('/ambassadors');
+  },
+
+  createAmbassador(ambassador: { name: string; phone?: string; branch_id?: string; notes?: string }) {
+    return request<ApiResponse>('/ambassadors', {
+      method: 'POST',
+      body: JSON.stringify(ambassador),
+    });
+  },
+
+  updateAmbassador(id: string, ambassador: Record<string, any>) {
+    return request<ApiResponse>(`/ambassadors/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(ambassador),
+    });
+  },
+
+  deleteAmbassador(id: string) {
+    return request<void>(`/ambassadors/${id}`, { method: 'DELETE' });
+  },
+
+  // ========== USERS ==========
+  getUsers() {
+    return request<ApiResponse<Array<unknown>>>('/users');
+  },
+
+  updateUser(id: string, updates: Record<string, unknown>) {
+    return request<ApiResponse>(`/users/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    });
+  },
+
+  deleteUser(id: string) {
+    return request<void>(`/users/${id}`, { method: 'DELETE' });
+  },
+
+  // ========== DASHBOARD ==========
+  getDashboardStats() {
+    return request<ApiResponse<Record<string, unknown>>>('/dashboard');
+  },
+
+  // ========== INVOICES ==========
   renewSubscription(id: string, payload: Record<string, any>) {
     return this.updateSubscription(id, payload);
   },
@@ -226,13 +395,6 @@ const api = {
     window.open(url, '_blank');
     return Promise.resolve({ ok: true });
   },
-
-  updateUser(id: string, updates: Record<string, unknown>) {
-    return request<ApiResponse>(`/users/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(updates),
-    });
-  },
 };
 
 if (typeof window !== 'undefined') {
@@ -240,3 +402,4 @@ if (typeof window !== 'undefined') {
 }
 
 export default api;
+

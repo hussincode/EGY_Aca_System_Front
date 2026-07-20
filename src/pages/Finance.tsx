@@ -84,6 +84,23 @@ const emptyForm: FinanceForm = {
   description: '',
 };
 
+function normalizeFinanceFromApi(row: Record<string, unknown>): FinanceEntry | null {
+  if (!row) return null;
+  return {
+    id: String(row.id || ''),
+    type: (String(row.type || '') as FinanceType),
+    category: String(row.category || ''),
+    branch: String(row.branch || row.branchName || ''),
+    branchId: String(row.branch_id || row.branchId || ''),
+    branchName: String(row.branchName || row.branch || ''),
+    relatedTo: String(row.related_to || row.relatedTo || ''),
+    amount: Number(row.amount || 0),
+    date: String(row.date || '').slice(0, 10),
+    description: String(row.description || ''),
+    createdBy: row.createdBy ? (row.createdBy as FinanceEntry['createdBy']) : null,
+  };
+}
+
 export default function FinancePage() {
   const [finances, setFinances] = useState<FinanceEntry[]>(() => readStoredData('finances', []));
   const [branches, setBranches] = useState<Branch[]>(() => readStoredData('branches', []));
@@ -97,6 +114,29 @@ export default function FinancePage() {
   const [filterMonth, setFilterMonth] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
+
+  // Load from API on mount
+  useEffect(() => {
+    const loadFromApi = async () => {
+      const api = window.api;
+      if (!api?.getFinanceRecords || !api?.getToken?.()) return;
+
+      try {
+        const response = await api.getFinanceRecords();
+        const serverData = Array.isArray(response?.data) ? response.data as Record<string, unknown>[] : [];
+        if (serverData.length > 0) {
+          const mapped = serverData.map((item) => normalizeFinanceFromApi(item)).filter(Boolean) as FinanceEntry[];
+          if (mapped.length > 0) {
+            setFinances(mapped);
+            window.localStorage.setItem('finances', JSON.stringify(mapped));
+          }
+        }
+      } catch {
+        // fallback to localStorage
+      }
+    };
+    loadFromApi();
+  }, []);
 
   useEffect(() => {
     const syncFromStorage = () => {
@@ -214,7 +254,7 @@ export default function FinancePage() {
     setForm(emptyForm);
   };
 
-  const handleSubmit = (event: FormEvent) => {
+  const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
 
     const amountNumber = Number(form.amount);
@@ -245,19 +285,67 @@ export default function FinancePage() {
       })(),
     };
 
-    const nextFinances = editingId
-      ? finances.map((entry) => (entry.id === editingId ? payload : entry))
-      : [...finances, payload];
+    try {
+      const api = window.api;
+      if (api?.getToken?.() && (api.updateFinance || api.createFinance)) {
+        if (editingId) {
+          if (api.updateFinance) {
+            await api.updateFinance(editingId, {
+              type: payload.type,
+              category: payload.category,
+              branchId: payload.branchId || null,
+              relatedTo: payload.relatedTo,
+              amount: payload.amount,
+              date: payload.date,
+              description: payload.description,
+            });
+          }
+        } else if (api.createFinance) {
+          await api.createFinance({
+            type: payload.type,
+            category: payload.category,
+            branch_id: payload.branchId || null,
+            related_to: payload.relatedTo,
+            amount: payload.amount,
+            date: payload.date,
+            description: payload.description,
+          });
+        }
+      }
 
-    persistFinances(nextFinances);
-    showToast(editingId ? 'تم تعديل الحركة المالية' : 'تم إضافة الحركة المالية');
-    closeModal();
-    window.dispatchEvent(new CustomEvent('app:sync', { detail: { key: 'finances', value: nextFinances } }));
+      const nextFinances = editingId
+        ? finances.map((entry) => (entry.id === editingId ? payload : entry))
+        : [...finances, payload];
+
+      persistFinances(nextFinances);
+      showToast(editingId ? 'تم تعديل الحركة المالية' : 'تم إضافة الحركة المالية');
+      closeModal();
+      window.dispatchEvent(new CustomEvent('app:sync', { detail: { key: 'finances', value: nextFinances } }));
+    } catch (error) {
+      console.error('Failed to save finance via API, saving locally', error);
+      const nextFinances = editingId
+        ? finances.map((entry) => (entry.id === editingId ? payload : entry))
+        : [...finances, payload];
+
+      persistFinances(nextFinances);
+      showToast(editingId ? 'تم تعديل الحركة المالية محلياً' : 'تم إضافة الحركة المالية محلياً');
+      closeModal();
+      window.dispatchEvent(new CustomEvent('app:sync', { detail: { key: 'finances', value: nextFinances } }));
+    }
   };
 
-  const handleDelete = (entryId?: string) => {
+  const handleDelete = async (entryId?: string) => {
     if (!entryId) return;
     if (!window.confirm('هل تريد حذف هذه الحركة المالية؟')) return;
+
+    try {
+      const api = window.api;
+      if (api?.getToken?.() && api.deleteFinance) {
+        await api.deleteFinance(entryId).catch(() => {});
+      }
+    } catch (error) {
+      console.error('Failed to delete finance via API', error);
+    }
 
     const nextFinances = finances.filter((entry) => entry.id !== entryId);
     persistFinances(nextFinances);

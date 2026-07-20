@@ -97,6 +97,20 @@ export default function Staff() {
   useEffect(() => {
     const sync = () => setStaff(readStoredData('staff', []));
     window.addEventListener('storage', sync);
+    const loadFromApi = async () => {
+      if (!window.api?.getToken?.() || !window.api?.getStaff) return;
+      try {
+        const response = await window.api.getStaff();
+        if (response?.data && Array.isArray(response.data) && response.data.length > 0) {
+          const apiStaff = response.data as StaffMember[];
+          setStaff(apiStaff);
+          window.localStorage.setItem('staff', JSON.stringify(apiStaff));
+        }
+      } catch {
+        // fallback to localStorage
+      }
+    };
+    loadFromApi();
     return () => window.removeEventListener('storage', sync);
   }, []);
 
@@ -139,31 +153,85 @@ export default function Staff() {
     setFormState(buildEmptyForm());
   };
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (editingIndex !== null) {
-      setStaff((current) =>
-        current.map((member, index) => (index === editingIndex ? { ...member, ...formState } : member))
-      );
-    } else {
-      setStaff((current) => [
-        ...current,
-        {
-          id: typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-            ? crypto.randomUUID()
-            : `${Date.now()}-${Math.random()}`,
-          staffSerial: formatStaffSerial(getNextStaffSequence(current)),
-          ...formState,
-        },
-      ]);
+    const staffPayload = {
+      name: formState.name,
+      phone: formState.phone,
+      role: formState.role,
+      pay_type: formState.payType,
+      rate: formState.rate,
+      hours: formState.hours,
+      revenue: formState.revenue,
+    };
+
+    try {
+      if (editingIndex !== null) {
+        const member = staff[editingIndex];
+        if (window.api?.updateStaff && member.id) {
+          await window.api.updateStaff(member.id, staffPayload);
+        }
+        setStaff((current) =>
+          current.map((member, index) => (index === editingIndex ? { ...member, ...formState } : member))
+        );
+      } else {
+        let newId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random()}`;
+        const newSerial = formatStaffSerial(getNextStaffSequence(staff));
+
+        if (window.api?.createStaff) {
+          const response = await window.api.createStaff({ ...staffPayload, staff_serial: newSerial });
+          const createResult = response as { data?: StaffMember };
+          if (createResult?.data) {
+            const created = createResult.data;
+            newId = created.id;
+          }
+        }
+
+        setStaff((current) => [
+          ...current,
+          {
+            id: newId,
+            staffSerial: newSerial,
+            ...formState,
+          },
+        ]);
+      }
+    } catch {
+      // fallback local save
+      if (editingIndex !== null) {
+        setStaff((current) =>
+          current.map((member, index) => (index === editingIndex ? { ...member, ...formState } : member))
+        );
+      } else {
+        setStaff((current) => [
+          ...current,
+          {
+            id: typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+              ? crypto.randomUUID()
+              : `${Date.now()}-${Math.random()}`,
+            staffSerial: formatStaffSerial(getNextStaffSequence(current)),
+            ...formState,
+          },
+        ]);
+      }
     }
 
     closeModal();
   };
 
-  const handleDelete = (index: number) => {
+  const handleDelete = async (index: number) => {
     if (!window.confirm('هل تريد حذف هذا الموظف؟')) return;
+    const member = staff[index];
+    try {
+      if (window.api?.deleteStaff && member.id) {
+        await window.api.deleteStaff(member.id);
+      }
+    } catch {
+      // fallback
+    }
     setStaff((current) => current.filter((_, idx) => idx !== index));
     if (editingIndex === index) {
       setEditingIndex(null);

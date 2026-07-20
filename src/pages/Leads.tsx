@@ -12,12 +12,14 @@ type Lead = {
   sport?: string;
   age?: string | number;
   branch?: string;
+  branch_id?: string;
   source?: string;
   score?: LeadScore;
   followDate?: string;
   tags?: string[];
   notes?: string;
   status?: LeadStatus;
+  created_at?: string;
 };
 
 type Player = {
@@ -56,11 +58,13 @@ const initialFormState: LeadFormState = {
   notes: '',
 };
 
+const LEADS_KEY = 'leads';
+const BRANCHES_KEY = 'branches';
+
 function readStoredData<T>(key: string, fallback: T): T {
   if (typeof window === 'undefined') return fallback;
   const stored = window.localStorage.getItem(key);
   if (!stored) return fallback;
-
   try {
     return JSON.parse(stored) as T;
   } catch {
@@ -87,6 +91,31 @@ function normalizeLead(lead: Partial<Lead> & { id?: string }): Lead {
     tags: Array.isArray(lead.tags) ? lead.tags : [],
     notes: lead.notes || '',
     status: lead.status || 'new',
+    branch_id: lead.branch_id || '',
+    created_at: lead.created_at || '',
+  };
+}
+
+function normalizeLeadFromDb(row: Record<string, unknown> | null | undefined): Lead | null {
+  if (!row) return null;
+  const id = String(row.id || '');
+  if (!id) return null;
+  return {
+    id,
+    name: String(row.name || ''),
+    phone: String(row.phone || ''),
+    sport: String(row.interest || ''),
+    branch: String((row as Record<string, unknown>).branch_name || ''),
+    branch_id: String(row.branch_id || ''),
+    notes: String(row.notes || ''),
+    status: (row.status as LeadStatus) || 'new',
+    parent: '',
+    age: '',
+    source: '',
+    score: 'hot',
+    followDate: '',
+    tags: [],
+    created_at: String(row.created_at || ''),
   };
 }
 
@@ -128,7 +157,7 @@ function getStatusClasses(status?: LeadStatus) {
 
 export default function Leads() {
   const navigate = useNavigate();
-  const [leads, setLeads] = useState<Lead[]>(() => readStoredData('leads', []).map(normalizeLead));
+  const [leads, setLeads] = useState<Lead[]>(() => readStoredData(LEADS_KEY, []).map(normalizeLead));
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [branchFilter, setBranchFilter] = useState('');
@@ -141,13 +170,49 @@ export default function Leads() {
   const [formState, setFormState] = useState<LeadFormState>(initialFormState);
   const [isSendingBulk, setIsSendingBulk] = useState(false);
 
+  // Load leads from API on mount
   useEffect(() => {
-    window.localStorage.setItem('leads', JSON.stringify(leads));
+    const loadLeads = async () => {
+      const api = window.api;
+      if (!api?.getLeads || !api?.getToken?.()) {
+        // No API available, use localStorage
+        setLeads(readStoredData(LEADS_KEY, []).map(normalizeLead));
+        return;
+      }
+
+      try {
+        const response = await api.getLeads();
+        const serverLeads = Array.isArray(response?.data) ? response.data : [];
+        const mapped = serverLeads
+          .map((item: unknown) => normalizeLeadFromDb(item as Record<string, unknown>))
+          .filter((item): item is Lead => Boolean(item));
+        
+        if (mapped.length > 0) {
+          // Merge with localStorage data
+          const localLeads = readStoredData<Lead[]>(LEADS_KEY, []);
+          const merged = [...mapped, ...localLeads.filter(
+            (local) => !mapped.some((server) => server.id === local.id)
+          )];
+          setLeads(merged);
+          window.localStorage.setItem(LEADS_KEY, JSON.stringify(merged));
+        }
+      } catch (error) {
+        console.error('Failed to load leads from API', error);
+        setLeads(readStoredData(LEADS_KEY, []).map(normalizeLead));
+      }
+    };
+
+    loadLeads();
+  }, []);
+
+  // Sync to localStorage whenever leads change
+  useEffect(() => {
+    window.localStorage.setItem(LEADS_KEY, JSON.stringify(leads));
   }, [leads]);
 
   useEffect(() => {
     const onStorage = () => {
-      const stored = readStoredData<Partial<Lead>[]>('leads', []);
+      const stored = readStoredData<Partial<Lead>[]>(LEADS_KEY, []);
       setLeads(stored.map(normalizeLead));
     };
     window.addEventListener('storage', onStorage);
@@ -220,7 +285,40 @@ export default function Leads() {
     resetModal();
   };
 
-  const handleSaveLead = () => {
+  const resolveBranchId = (branchName: string): string | null => {
+    if (!branchName) return null;
+    const branches = readStoredData<Array<{ id: string; name: string }>>(BRANCHES_KEY, []);
+    const found = branches.find((b) => b.name === branchName);
+    return found?.id || null;
+  };
+
+  const saveLeadToDb = async (lead: Lead): Promise<boolean> => {
+    const api = window.api;
+    if (!api?.createLead || !api?.updateLead || !api?.getToken?.()) return false;
+
+    try {
+      const payload = {
+        name: lead.name,
+        phone: lead.phone || '',
+        interest: lead.sport || '',
+        status: lead.status || 'new',
+        branch_id: resolveBranchId(lead.branch || '') || undefined,
+        notes: [lead.source ? `المصدر: ${lead.source}` : '', lead.parent ? `ولي الأمر: ${lead.parent}` : '', lead.age ? `العمر: ${lead.age}` : '', lead.score ? `التقييم: ${lead.score}` : '', lead.followDate ? `متابعة: ${lead.followDate}` : '', lead.tags?.length ? `Tags: ${lead.tags.join(', ')}` : ''].filter(Boolean).join('\n'),
+      };
+
+      if (editingLeadId) {
+        await api.updateLead(lead.id, payload);
+      } else {
+        await api.createLead(payload);
+      }
+      return true;
+    } catch (error) {
+      console.error('Failed to save lead to DB', error);
+      return false;
+    }
+  };
+
+  const handleSaveLead = async () => {
     if (!formState.name.trim()) {
       window.alert('أدخل اسم العميل أولاً');
       return;
@@ -247,23 +345,56 @@ export default function Leads() {
       status: editingLeadId ? (leads.find((lead) => lead.id === editingLeadId)?.status || 'new') : 'new',
     };
 
+    // Try API first, fall back to localStorage
+    await saveLeadToDb(leadData);
+
     setLeads((prev) => {
-      if (editingLeadId) {
-        return prev.map((lead) => (lead.id === editingLeadId ? leadData : lead));
-      }
-      return [leadData, ...prev];
+      const next = editingLeadId
+        ? prev.map((lead) => (lead.id === editingLeadId ? leadData : lead))
+        : [leadData, ...prev];
+      window.localStorage.setItem(LEADS_KEY, JSON.stringify(next));
+      return next;
     });
 
     closeModal();
   };
 
-  const handleRemoveLead = (leadId: string) => {
+  const handleRemoveLead = async (leadId: string) => {
     if (!window.confirm('هل تريد حذف هذا العميل؟')) return;
-    setLeads((prev) => prev.filter((lead) => lead.id !== leadId));
+
+    // Try API first
+    const api = window.api;
+    if (api?.deleteLead && api?.getToken?.()) {
+      try {
+        await api.deleteLead(leadId);
+      } catch (error) {
+        console.error('Failed to delete lead from DB', error);
+      }
+    }
+
+    setLeads((prev) => {
+      const next = prev.filter((lead) => lead.id !== leadId);
+      window.localStorage.setItem(LEADS_KEY, JSON.stringify(next));
+      return next;
+    });
   };
 
-  const handleChangeStatus = (leadId: string, status: LeadStatus) => {
-    setLeads((prev) => prev.map((lead) => (lead.id === leadId ? { ...lead, status } : lead)));
+  const handleChangeStatus = async (leadId: string, status: LeadStatus) => {
+    // Try API first
+    const api = window.api;
+    if (api?.updateLead && api?.getToken?.()) {
+      try {
+        await api.updateLead(leadId, { status });
+      } catch (error) {
+        console.error('Failed to update lead status in DB', error);
+      }
+    }
+
+    setLeads((prev) => {
+      const next = prev.map((lead) => (lead.id === leadId ? { ...lead, status } : lead));
+      window.localStorage.setItem(LEADS_KEY, JSON.stringify(next));
+      return next;
+    });
   };
 
   const handleSendLeadWhatsApp = (phone?: string, name?: string) => {
@@ -323,7 +454,11 @@ export default function Leads() {
     });
 
     window.localStorage.setItem('players', JSON.stringify(players));
-    setLeads((prev) => prev.map((item) => (item.id === lead.id ? { ...item, status: 'convert' } : item)));
+    setLeads((prev) => {
+      const next = prev.map((item) => (item.id === lead.id ? { ...item, status: 'convert' as LeadStatus } : item));
+      window.localStorage.setItem(LEADS_KEY, JSON.stringify(next));
+      return next;
+    });
     window.alert('تم تحويل العميل إلى لاعب');
     navigate('/players');
   };
@@ -435,7 +570,7 @@ export default function Leads() {
             type="button"
             onClick={handleSendBulkWhatsApp}
             disabled={isSendingBulk}
-            className="p-20 rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-400"
+            className="rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-400"
           >
             {isSendingBulk ? 'جارٍ الإرسال...' : 'إرسال للكل'}
           </button>
@@ -568,69 +703,77 @@ export default function Leads() {
       </div>
 
       {isModalOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
-          <div className="w-full max-w-2xl rounded-3xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-              <h2 className="text-xl font-semibold text-slate-900">{editingLeadId ? 'تعديل العميل' : 'إضافة عميل'}</h2>
-              <button type="button" onClick={closeModal} className="text-slate-500 transition hover:text-slate-900">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4">
+          <div className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-[32px] bg-white shadow-2xl ring-1 ring-slate-200/70">
+            <div className="flex items-start justify-between border-b border-slate-200 bg-slate-50 px-6 py-5">
+              <div>
+                <p className="text-sm text-slate-500">إدارة العملاء المحتملين</p>
+                <h2 className="mt-1 text-xl font-semibold text-slate-900">{editingLeadId ? 'تعديل العميل' : 'إضافة عميل'}</h2>
+              </div>
+              <button type="button" onClick={closeModal} className="rounded-full p-2 text-slate-500 transition hover:bg-slate-200 hover:text-slate-900">
                 ×
               </button>
             </div>
-            <div className="grid gap-4 p-6 md:grid-cols-2">
-              <label className="space-y-2 text-sm text-slate-700">
-                اسم اللاعب
-                <input value={formState.name} onChange={(event) => setFormState((prev) => ({ ...prev, name: event.target.value }))} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-right" />
-              </label>
-              <label className="space-y-2 text-sm text-slate-700">
-                اسم ولي الأمر
-                <input value={formState.parent} onChange={(event) => setFormState((prev) => ({ ...prev, parent: event.target.value }))} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-right" />
-              </label>
-              <label className="space-y-2 text-sm text-slate-700">
-                رقم الهاتف
-                <input value={formState.phone} onChange={(event) => setFormState((prev) => ({ ...prev, phone: event.target.value }))} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-right" />
-              </label>
-              <label className="space-y-2 text-sm text-slate-700">
-                الرياضة
-                <input value={formState.sport} onChange={(event) => setFormState((prev) => ({ ...prev, sport: event.target.value }))} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-right" />
-              </label>
-              <label className="space-y-2 text-sm text-slate-700">
-                العمر
-                <input type="number" value={formState.age} onChange={(event) => setFormState((prev) => ({ ...prev, age: event.target.value }))} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-right" />
-              </label>
-              <label className="space-y-2 text-sm text-slate-700">
-                الفرع
-                <input value={formState.branch} onChange={(event) => setFormState((prev) => ({ ...prev, branch: event.target.value }))} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-right" />
-              </label>
-              <label className="space-y-2 text-sm text-slate-700">
-                المصدر
-                <input value={formState.source} onChange={(event) => setFormState((prev) => ({ ...prev, source: event.target.value }))} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-right" />
-              </label>
-              <label className="space-y-2 text-sm text-slate-700">
-                التقييم
-                <select value={formState.score} onChange={(event) => setFormState((prev) => ({ ...prev, score: event.target.value as LeadScore }))} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-right">
-                  <option value="hot">ساخن</option>
-                  <option value="mid">متوسط</option>
-                  <option value="cold">بارد</option>
-                </select>
-              </label>
-              <label className="space-y-2 text-sm text-slate-700">
-                تاريخ المتابعة
-                <input type="date" value={formState.followDate} onChange={(event) => setFormState((prev) => ({ ...prev, followDate: event.target.value }))} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-right" />
-              </label>
-              <label className="space-y-2 text-sm text-slate-700 md:col-span-2">
-                Tags
-                <input value={formState.tags} onChange={(event) => setFormState((prev) => ({ ...prev, tags: event.target.value }))} placeholder="مثال: VIP, Trial" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-right" />
-              </label>
-              <label className="space-y-2 text-sm text-slate-700 md:col-span-2">
-                ملاحظات
-                <textarea value={formState.notes} onChange={(event) => setFormState((prev) => ({ ...prev, notes: event.target.value }))} className="min-h-[90px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-right" />
-              </label>
+            <div className="overflow-y-auto p-6">
+              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-sm text-slate-600">أدخل بيانات العميل المحتمل بطريقة منظمة حتى يسهل المتابعة والتخزين.</p>
+              </div>
+              <div className="mt-6 grid gap-4 md:grid-cols-2">
+                <label className="space-y-2 text-right text-sm font-medium text-slate-700">
+                  اسم اللاعب
+                  <input value={formState.name} onChange={(event) => setFormState((prev) => ({ ...prev, name: event.target.value }))} placeholder="أدخل الاسم" className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" />
+                </label>
+                <label className="space-y-2 text-right text-sm font-medium text-slate-700">
+                  اسم ولي الأمر
+                  <input value={formState.parent} onChange={(event) => setFormState((prev) => ({ ...prev, parent: event.target.value }))} placeholder="أدخل اسم ولي الأمر" className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" />
+                </label>
+                <label className="space-y-2 text-right text-sm font-medium text-slate-700">
+                  رقم الهاتف
+                  <input value={formState.phone} onChange={(event) => setFormState((prev) => ({ ...prev, phone: event.target.value }))} placeholder="مثلاً: 01000000000" className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" />
+                </label>
+                <label className="space-y-2 text-right text-sm font-medium text-slate-700">
+                  الرياضة
+                  <input value={formState.sport} onChange={(event) => setFormState((prev) => ({ ...prev, sport: event.target.value }))} placeholder="مثلاً: كرة قدم" className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" />
+                </label>
+                <label className="space-y-2 text-right text-sm font-medium text-slate-700">
+                  العمر
+                  <input type="number" value={formState.age} onChange={(event) => setFormState((prev) => ({ ...prev, age: event.target.value }))} placeholder="أدخل العمر" className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" />
+                </label>
+                <label className="space-y-2 text-right text-sm font-medium text-slate-700">
+                  الفرع
+                  <input value={formState.branch} onChange={(event) => setFormState((prev) => ({ ...prev, branch: event.target.value }))} placeholder="أدخل اسم الفرع" className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" />
+                </label>
+                <label className="space-y-2 text-right text-sm font-medium text-slate-700">
+                  المصدر
+                  <input value={formState.source} onChange={(event) => setFormState((prev) => ({ ...prev, source: event.target.value }))} placeholder="مثلاً: إنستغرام" className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" />
+                </label>
+                <label className="space-y-2 text-right text-sm font-medium text-slate-700">
+                  التقييم
+                  <select value={formState.score} onChange={(event) => setFormState((prev) => ({ ...prev, score: event.target.value as LeadScore }))} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none">
+                    <option value="hot">ساخن</option>
+                    <option value="mid">متوسط</option>
+                    <option value="cold">بارد</option>
+                  </select>
+                </label>
+                <label className="space-y-2 text-right text-sm font-medium text-slate-700">
+                  تاريخ المتابعة
+                  <input type="date" value={formState.followDate} onChange={(event) => setFormState((prev) => ({ ...prev, followDate: event.target.value }))} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" />
+                </label>
+                <label className="space-y-2 text-right text-sm font-medium text-slate-700 md:col-span-2">
+                  Tags
+                  <input value={formState.tags} onChange={(event) => setFormState((prev) => ({ ...prev, tags: event.target.value }))} placeholder="مثال: VIP, Trial" className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" />
+                </label>
+                <label className="space-y-2 text-right text-sm font-medium text-slate-700 md:col-span-2">
+                  ملاحظات
+                  <textarea value={formState.notes} onChange={(event) => setFormState((prev) => ({ ...prev, notes: event.target.value }))} placeholder="اكتب أي ملاحظات هنا" className="min-h-[96px] w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" />
+                </label>
+              </div>
             </div>
             <div className="flex items-center justify-end gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4">
-              <button type="button" onClick={closeModal} className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
+              <button type="button" onClick={closeModal} className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100">
                 إلغاء
               </button>
-              <button type="button" onClick={handleSaveLead} className="rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white">
+              <button type="button" onClick={handleSaveLead} className="rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700">
                 حفظ
               </button>
             </div>

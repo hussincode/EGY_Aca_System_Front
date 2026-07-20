@@ -114,6 +114,7 @@ export default function Players() {
   const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);
   const [formState, setFormState] = useState<PlayerFormState>(initialFormState);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
   const [videoFacingMode, setVideoFacingMode] = useState<'environment' | 'user'>('environment');
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
@@ -252,6 +253,7 @@ export default function Players() {
       setCurrentPlayerId(null);
       setFormState(initialFormState);
     }
+    setFormError(null);
     setIsPlayerModalOpen(true);
   };
 
@@ -259,17 +261,20 @@ export default function Players() {
     setIsPlayerModalOpen(false);
     setCurrentPlayerId(null);
     setFormState(initialFormState);
+    setFormError(null);
   };
 
   const handleSavePlayer = () => {
     if (!formState.name.trim()) {
-      setToastMessage('أدخل اسم اللاعب');
+      setFormError('أدخل اسم اللاعب');
       return;
     }
     if (!formState.game.trim()) {
-      setToastMessage('اختر اللعبة');
+      setFormError('اختر اللعبة');
       return;
     }
+
+    setFormError(null);
 
     const playerPayload: Player = {
       id: currentPlayerId || Date.now().toString(),
@@ -556,8 +561,9 @@ export default function Players() {
             <button
               type="button"
               onClick={() => {
-                setPlayers((prev) => prev.filter((player) => player.branch || player.phone));
-                setToastMessage('تم حذف اللاعبين بدون فرع');
+                const removedCount = players.filter((player) => !player.branch || !player.branch.trim()).length;
+                setPlayers((prev) => prev.filter((player) => Boolean(player.branch && player.branch.trim())));
+                setToastMessage(removedCount > 0 ? `تم حذف ${removedCount} لاعب بدون فرع` : 'لا يوجد لاعبين بدون فرع');
               }}
               className="rounded-3xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 transition hover:bg-rose-100"
             >
@@ -671,211 +677,227 @@ export default function Players() {
 
       {isPlayerModalOpen ? (
         <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/75 p-4">
-          <div className="w-full max-w-3xl max-h-[calc(100vh-4rem)] overflow-hidden rounded-3xl bg-white shadow-2xl">
+          <div className="flex max-h-[95vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
               <h2 className="text-xl font-semibold text-slate-900">{currentPlayerId ? 'تعديل بيانات اللاعب' : 'إضافة لاعب'}</h2>
               <button type="button" onClick={handleClosePlayerModal} className="text-slate-500 transition hover:text-slate-900">×</button>
             </div>
-            <div className="grid gap-6 p-6 lg:grid-cols-[1.1fr_0.9fr]">
-              <div className="space-y-4 overflow-y-auto pr-1" style={{ maxHeight: 'calc(100vh - 12rem)' }}>
-                <div className="grid gap-4 md:grid-cols-2">
-                  <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                    الاسم
-                    <input
-                      type="text"
-                      value={formState.name}
-                      onChange={(event) => setFormState((prev) => ({ ...prev, name: event.target.value }))}
-                      className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
-                    />
-                  </label>
-                  <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                    العمر
-                    <input
-                      type="number"
-                      value={formState.age ?? ''}
-                      onChange={(event) => setFormState((prev) => ({ ...prev, age: event.target.value ? Number(event.target.value) : undefined }))}
-                      className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
-                    />
-                  </label>
+            <div className="overflow-y-auto p-6">
+              {formError ? (
+                <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
+                  {formError}
                 </div>
-                <div className="grid gap-4 md:grid-cols-2">
-                  <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                    رقم الهاتف
-                    <input
-                      type="tel"
-                      value={formState.phone}
-                      onChange={(event) => setFormState((prev) => ({ ...prev, phone: event.target.value }))}
-                      className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
-                    />
-                  </label>
-                  <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                    اللعبة
-                    <select
-                      value={formState.game}
-                      onChange={(event) => setFormState((prev) => ({ ...prev, game: event.target.value }))}
-                      className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
-                    >
-                      <option value="">-- اختر لعبة --</option>
-                      {games.map((game) => (
-                        <option key={game.id} value={game.name}>{game.name}</option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-                <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+              ) : null}
+              <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+                <div className="space-y-4 pr-1">
                   <div className="grid gap-4 md:grid-cols-2">
                     <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                      الفرع
+                      الاسم
+                      <input
+                        type="text"
+                        value={formState.name}
+                        onChange={(event) => {
+                          setFormState((prev) => ({ ...prev, name: event.target.value }));
+                          if (formError) setFormError(null);
+                        }}
+                        placeholder="مثلاً: أحمد محمد"
+                        className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
+                      />
+                    </label>
+                    <label className="space-y-2 text-right text-sm font-medium text-slate-700">
+                      العمر
+                      <input
+                        type="number"
+                        value={formState.age ?? ''}
+                        onChange={(event) => setFormState((prev) => ({ ...prev, age: event.target.value ? Number(event.target.value) : undefined }))}
+                        className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
+                      />
+                    </label>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <label className="space-y-2 text-right text-sm font-medium text-slate-700">
+                      رقم الهاتف
+                      <input
+                        type="tel"
+                        value={formState.phone}
+                        onChange={(event) => setFormState((prev) => ({ ...prev, phone: event.target.value }))}
+                        placeholder="مثلاً: 01012345678"
+                        className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
+                      />
+                    </label>
+                    <label className="space-y-2 text-right text-sm font-medium text-slate-700">
+                      اللعبة
                       <select
-                        value={formState.branch}
-                        onChange={(event) => setFormState((prev) => ({ ...prev, branch: event.target.value }))}
-                        className="w-full rounded-3xl border border-slate-200 bg-white px-4 py-3 text-right text-sm text-slate-900 outline-none"
+                        value={formState.game}
+                        onChange={(event) => {
+                          setFormState((prev) => ({ ...prev, game: event.target.value }));
+                          if (formError) setFormError(null);
+                        }}
+                        className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
                       >
-                        <option value="">-- اختر فرع --</option>
-                        {branches.map((branch) => (
-                          <option key={branch.id} value={branch.name}>{branch.name}</option>
+                        <option value="">-- اختر لعبة --</option>
+                        {games.map((game) => (
+                          <option key={game.id} value={game.name}>{game.name}</option>
                         ))}
                       </select>
                     </label>
-                    <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                      مواعيد التدريب
-                      <input
-                        value={formState.schedule}
-                        onChange={(event) => setFormState((prev) => ({ ...prev, schedule: event.target.value }))}
-                        placeholder="مثلاً: السبت والثلاثاء 4 عصراً"
-                        className="w-full rounded-3xl border border-slate-200 bg-white px-4 py-3 text-right text-sm text-slate-900 outline-none"
-                      />
-                    </label>
                   </div>
-                </div>
-                <div className="grid gap-4 md:grid-cols-2">
-                  <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                    الحالة المالية
-                    <select
-                      value={formState.status}
-                      onChange={(event) => setFormState((prev) => ({ ...prev, status: event.target.value as 'paid' | 'due' }))}
-                      className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
-                    >
-                      <option value="paid">مسدد</option>
-                      <option value="due">مديون</option>
-                    </select>
-                  </label>
-                  <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                    رمز السفير
-                    <input
-                      value={formState.ambId}
-                      onChange={(event) => setFormState((prev) => ({ ...prev, ambId: event.target.value }))}
-                      placeholder="REF1234"
-                      className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
-                    />
-                  </label>
-                </div>
-                <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="mb-4 flex items-center gap-3">
-                    <AppIcon icon={CalendarCheck01} className="text-slate-500" />
-                    <h3 className="font-semibold text-slate-900">بيانات العضوية</h3>
+                  <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <label className="space-y-2 text-right text-sm font-medium text-slate-700">
+                        الفرع
+                        <select
+                          value={formState.branch}
+                          onChange={(event) => setFormState((prev) => ({ ...prev, branch: event.target.value }))}
+                          className="w-full rounded-3xl border border-slate-200 bg-white px-4 py-3 text-right text-sm text-slate-900 outline-none"
+                        >
+                          <option value="">-- اختر فرع --</option>
+                          {branches.map((branch) => (
+                            <option key={branch.id} value={branch.name}>{branch.name}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="space-y-2 text-right text-sm font-medium text-slate-700">
+                        مواعيد التدريب
+                        <input
+                          value={formState.schedule}
+                          onChange={(event) => setFormState((prev) => ({ ...prev, schedule: event.target.value }))}
+                          placeholder="مثلاً: السبت والثلاثاء 4 عصراً"
+                          className="w-full rounded-3xl border border-slate-200 bg-white px-4 py-3 text-right text-sm text-slate-900 outline-none"
+                        />
+                      </label>
+                    </div>
                   </div>
                   <div className="grid gap-4 md:grid-cols-2">
                     <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                      نوع العضوية
+                      الحالة المالية
                       <select
-                        value={formState.memberType}
-                        onChange={(event) => setFormState((prev) => ({ ...prev, memberType: event.target.value as PlayerFormState['memberType'] }))}
-                        className="w-full rounded-3xl border border-slate-200 bg-white px-4 py-3 text-right text-sm text-slate-900 outline-none"
+                        value={formState.status}
+                        onChange={(event) => setFormState((prev) => ({ ...prev, status: event.target.value as 'paid' | 'due' }))}
+                        className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
                       >
-                        <option value="none">بدون عضوية</option>
-                        <option value="annual">عضوية سنوية (أكاديمية)</option>
-                        <option value="federation">عضوية اتحاد (لاعب مسجل)</option>
+                        <option value="paid">مسدد</option>
+                        <option value="due">مديون</option>
                       </select>
                     </label>
                     <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                      رقم العضوية/الاتحاد
+                      رمز السفير
                       <input
-                        value={formState.memberId}
-                        onChange={(event) => setFormState((prev) => ({ ...prev, memberId: event.target.value }))}
-                        className="w-full rounded-3xl border border-slate-200 bg-white px-4 py-3 text-right text-sm text-slate-900 outline-none"
+                        value={formState.ambId}
+                        onChange={(event) => setFormState((prev) => ({ ...prev, ambId: event.target.value }))}
+                        placeholder="REF1234"
+                        className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
                       />
                     </label>
+                  </div>
+                  <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="mb-4 flex items-center gap-3">
+                      <AppIcon icon={CalendarCheck01} className="text-slate-500" />
+                      <h3 className="font-semibold text-slate-900">بيانات العضوية</h3>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <label className="space-y-2 text-right text-sm font-medium text-slate-700">
+                        نوع العضوية
+                        <select
+                          value={formState.memberType}
+                          onChange={(event) => setFormState((prev) => ({ ...prev, memberType: event.target.value as PlayerFormState['memberType'] }))}
+                          className="w-full rounded-3xl border border-slate-200 bg-white px-4 py-3 text-right text-sm text-slate-900 outline-none"
+                        >
+                          <option value="none">بدون عضوية</option>
+                          <option value="annual">عضوية سنوية (أكاديمية)</option>
+                          <option value="federation">عضوية اتحاد (لاعب مسجل)</option>
+                        </select>
+                      </label>
+                      <label className="space-y-2 text-right text-sm font-medium text-slate-700">
+                        رقم العضوية/الاتحاد
+                        <input
+                          value={formState.memberId}
+                          onChange={(event) => setFormState((prev) => ({ ...prev, memberId: event.target.value }))}
+                          placeholder="رقم العضوية أو الاتحاد"
+                          className="w-full rounded-3xl border border-slate-200 bg-white px-4 py-3 text-right text-sm text-slate-900 outline-none"
+                        />
+                      </label>
+                      <label className="space-y-2 text-right text-sm font-medium text-slate-700">
+                        تاريخ انتهاء العضوية
+                        <input
+                          type="date"
+                          value={formState.memberExpiry}
+                          onChange={(event) => setFormState((prev) => ({ ...prev, memberExpiry: event.target.value }))}
+                          className="w-full rounded-3xl border border-slate-200 bg-white px-4 py-3 text-right text-sm text-slate-900 outline-none"
+                        />
+                      </label>
+                      <label className="space-y-2 text-right text-sm font-medium text-slate-700">
+                        قيمة العضوية السنوية
+                        <input
+                          type="number"
+                          value={formState.memberValue}
+                          onChange={(event) => setFormState((prev) => ({ ...prev, memberValue: Number(event.target.value) }))}
+                          className="w-full rounded-3xl border border-slate-200 bg-white px-4 py-3 text-right text-sm text-slate-900 outline-none"
+                          placeholder="0"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
                     <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                      تاريخ انتهاء العضوية
-                      <input
-                        type="date"
-                        value={formState.memberExpiry}
-                        onChange={(event) => setFormState((prev) => ({ ...prev, memberExpiry: event.target.value }))}
-                        className="w-full rounded-3xl border border-slate-200 bg-white px-4 py-3 text-right text-sm text-slate-900 outline-none"
-                      />
+                      نوع الاشتراك
+                      <select
+                        value={formState.subscriptionPlan}
+                        onChange={(event) => setFormState((prev) => ({ ...prev, subscriptionPlan: event.target.value as SubscriptionPlan }))}
+                        className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
+                      >
+                        <option value="monthly">شهري</option>
+                        <option value="3months">3 أشهر</option>
+                        <option value="6months">6 أشهر</option>
+                      </select>
                     </label>
                     <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                      قيمة العضوية السنوية
+                      قيمة الاشتراك (EGP)
                       <input
                         type="number"
-                        value={formState.memberValue}
-                        onChange={(event) => setFormState((prev) => ({ ...prev, memberValue: Number(event.target.value) }))}
-                        className="w-full rounded-3xl border border-slate-200 bg-white px-4 py-3 text-right text-sm text-slate-900 outline-none"
-                        placeholder="0"
+                        value={formState.subscriptionValue}
+                        onChange={(event) => setFormState((prev) => ({ ...prev, subscriptionValue: Number(event.target.value) }))}
+                        className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
+                        placeholder="100"
                       />
                     </label>
                   </div>
                 </div>
-                <div className="grid gap-4 md:grid-cols-2">
-                  <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                    نوع الاشتراك
-                    <select
-                      value={formState.subscriptionPlan}
-                      onChange={(event) => setFormState((prev) => ({ ...prev, subscriptionPlan: event.target.value as SubscriptionPlan }))}
-                      className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
-                    >
-                      <option value="monthly">شهري</option>
-                      <option value="3months">3 أشهر</option>
-                      <option value="6months">6 أشهر</option>
-                    </select>
-                  </label>
-                  <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                    قيمة الاشتراك (EGP)
-                    <input
-                      type="number"
-                      value={formState.subscriptionValue}
-                      onChange={(event) => setFormState((prev) => ({ ...prev, subscriptionValue: Number(event.target.value) }))}
-                      className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
-                      placeholder="100"
+                <div className="space-y-6">
+                  <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4 text-center">
+                    <img
+                      src={formState.photo || '/logo.jpg'}
+                      alt="صورة اللاعب"
+                      className="mx-auto h-24 w-24 rounded-full object-cover"
                     />
-                  </label>
-                </div>
-              </div>
-              <div className="space-y-6">
-                <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4 text-center">
-                  <img
-                    src={formState.photo || '/logo.jpg'}
-                    alt="صورة اللاعب"
-                    className="mx-auto h-24 w-24 rounded-full object-cover"
-                  />
-                  <div className="mt-4 flex items-center justify-center gap-3">
-                    <label className="inline-flex cursor-pointer items-center justify-center rounded-full bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800">
-                      رفع صورة
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(event) => handlePhotoChange(event.target.files?.[0] ?? undefined)}
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      onClick={handleOpenCamera}
-                      className="inline-flex items-center justify-center rounded-full bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700"
-                    >
-                      الكاميرا
-                    </button>
+                    <div className="mt-4 flex items-center justify-center gap-3">
+                      <label className="inline-flex cursor-pointer items-center justify-center rounded-full bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800">
+                        رفع صورة
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(event) => handlePhotoChange(event.target.files?.[0] ?? undefined)}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleOpenCamera}
+                        className="inline-flex items-center justify-center rounded-full bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700"
+                      >
+                        الكاميرا
+                      </button>
+                    </div>
                   </div>
-                </div>
-                <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="space-y-2 text-right text-sm font-medium text-slate-700">
-                    <label>الرقم التسلسلي</label>
-                    <input value={formState.playerSerial} readOnly className="w-full rounded-3xl border border-slate-200 bg-white px-4 py-3 text-right text-sm text-slate-900 outline-none" />
-                  </div>
-                  <div className="space-y-2 text-right text-sm font-medium text-slate-700 mt-4">
-                    <label>قيمة الباركود</label>
-                    <input value={formState.playerBarcodeValue} readOnly className="w-full rounded-3xl border border-slate-200 bg-white px-4 py-3 text-right text-sm text-slate-900 outline-none" />
+                  <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="space-y-2 text-right text-sm font-medium text-slate-700">
+                      <label>الرقم التسلسلي</label>
+                      <input value={formState.playerSerial} readOnly className="w-full rounded-3xl border border-slate-200 bg-white px-4 py-3 text-right text-sm text-slate-900 outline-none" />
+                    </div>
+                    <div className="space-y-2 text-right text-sm font-medium text-slate-700 mt-4">
+                      <label>قيمة الباركود</label>
+                      <input value={formState.playerBarcodeValue} readOnly className="w-full rounded-3xl border border-slate-200 bg-white px-4 py-3 text-right text-sm text-slate-900 outline-none" />
+                    </div>
                   </div>
                 </div>
               </div>

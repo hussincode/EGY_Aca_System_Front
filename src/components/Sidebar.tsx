@@ -40,6 +40,7 @@ const sidebarSections = [
 const Sidebar = ({ isOpen, setIsOpen }: SidebarProps) => {
     const [isHovered, setIsHovered] = useState(false);
     const navigate = useNavigate();
+    const expanded = isOpen || isHovered;
 
     const handleLogout = () => {
         window.api?.logout?.();
@@ -76,9 +77,9 @@ const Sidebar = ({ isOpen, setIsOpen }: SidebarProps) => {
                     </button>
                 </div>
                 <div className="mb-10 transition-all duration-300">
-                    <div className={`flex items-center gap-3 ${isOpen ? "justify-start" : "justify-center"}`}>
+                    <div className={`flex items-center gap-3 ${isOpen || isHovered ? "justify-start" : "justify-center"}`}>
                         <img src={logo} alt="Academy Logo" className="h-10 w-10 rounded-xl object-cover" />
-                        <div className={`${isOpen ? "block" : "hidden"}`}>
+                        <div className={`${isOpen || isHovered ? "block" : "hidden"}`}>
                             <h2 className="text-2xl font-semibold">ايجي سبورتنج كلوب</h2>
                             <p className="mt-1 text-sm text-slate-400">نظام الإدارة</p>
                         </div>
@@ -88,7 +89,7 @@ const Sidebar = ({ isOpen, setIsOpen }: SidebarProps) => {
                 <nav className="space-y-6">
                     {sidebarSections.map((section) => (
                         <div key={section.label}>
-                            <div className={`${isOpen ? "mb-3 text-xs font-semibold uppercase tracking-[0.15em] text-slate-500" : "hidden"}`}>
+                            <div className={`${expanded ? "mb-3 text-xs font-semibold uppercase tracking-[0.15em] text-slate-500" : "hidden"}`}>
                                 {section.label}
                             </div>
                             <ul className="space-y-2">
@@ -103,11 +104,11 @@ const Sidebar = ({ isOpen, setIsOpen }: SidebarProps) => {
                                                         isActive
                                                             ? "bg-slate-800 text-white"
                                                             : "text-slate-300 hover:bg-slate-900 hover:text-white"
-                                                    } ${isOpen ? "justify-start" : "justify-center"}`
+                                                    } ${expanded ? "justify-start" : "justify-center"}`
                                                 }
                                             >
                                                 <AppIcon icon={Icon} className="group-hover:text-slate-200" />
-                                                <span className={`${isOpen ? "block" : "hidden"} text-sm`}>{item.label}</span>
+                                                <span className={`${expanded ? "block" : "hidden"} text-sm`}>{item.label}</span>
                                             </NavLink>
                                         </li>
                                     );
@@ -117,7 +118,7 @@ const Sidebar = ({ isOpen, setIsOpen }: SidebarProps) => {
                     ))}
                 </nav>
 
-                <div className={`mt-8 border-t border-slate-800 pt-4 transition-all duration-300 ${isOpen ? "block" : "hidden"}`}>
+                <div className={`mt-8 border-t border-slate-800 pt-4 transition-all duration-300 ${expanded ? "block" : "hidden"}`}>
                     <div className="space-y-2 text-sm text-slate-300">
                         <NavLink
                             to="/settings"

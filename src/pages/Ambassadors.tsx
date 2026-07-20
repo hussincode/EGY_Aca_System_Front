@@ -39,6 +39,9 @@ export default function Ambassadors() {
   const [players, setPlayers] = useState<ReferredPlayer[]>(() =>
     readStoredData<ReferredPlayer[]>('players', [])
   );
+  const [referrals] = useState<ReferredPlayer[]>(() =>
+    readStoredData<ReferredPlayer[]>('ambassadorReferrals', [])
+  );
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -54,6 +57,10 @@ export default function Ambassadors() {
   useEffect(() => {
     window.localStorage.setItem('players', JSON.stringify(players));
   }, [players]);
+
+  useEffect(() => {
+    window.localStorage.setItem('ambassadorReferrals', JSON.stringify(referrals));
+  }, [referrals]);
 
   function calculatePointsForPlayer(p: ReferredPlayer): number {
     let points = 0;
@@ -87,7 +94,7 @@ export default function Ambassadors() {
 
   const calculateAmbassadorPoints = useCallback(
     (ambId: string): AmbassadorStats => {
-      const referredPlayers = players.filter((p) => p.AmbId === ambId);
+      const referredPlayers = [...players, ...referrals].filter((p) => p.AmbId === ambId);
       const activePlayers = referredPlayers.filter(
         (p) => p.Subscription?.status === 'active'
       );
@@ -108,7 +115,7 @@ export default function Ambassadors() {
 
       return { totalPoints, rewards, referredPlayers: playersWithPoints, activeCount };
     },
-    [players]
+    [players, referrals]
   );
 
   const ambassadorRows = useMemo(

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Bell03, SearchSm, Phone01, CalendarCheck01, Gift02 } from '@untitledui/icons';
 import AppIcon from '@/components/AppIcon';
+import type { Ambassador } from '../types/ambassador';
 
 type SubscriptionPlan = 'monthly' | '3months' | '6months';
 
@@ -37,6 +38,22 @@ type Game = { id: string; name: string };
 type TrainingSchedule = { id: string; branch?: string | { id: string }; sport?: string | { id: string }; day?: string; startTime?: string; endTime?: string };
 type AttendanceRecord = { id: string; playerId: string; status: 'present' | 'absent' | string; date: string };
 type SubscriptionRecord = { id: string; playerId?: string; player?: string; status?: string; sessions?: number; endDate?: string };
+type AmbassadorReferral = {
+  playerId: string;
+  AmbId: string;
+  Name: string;
+  Age: number;
+  Sport: string;
+  Activity: string;
+  Subscription: {
+    plan: string;
+    status: string;
+    value: number;
+  };
+  Joined: boolean;
+  RefPointsCounted: boolean;
+  JoinedDate: string;
+};
 
 type PlayerFormState = {
   name: string;
@@ -104,6 +121,8 @@ export default function Players() {
   const [schedules, setSchedules] = useState<TrainingSchedule[]>(() => readStoredData('trainingSchedules', []));
   const [attendance, setAttendance] = useState<AttendanceRecord[]>(() => readStoredData('attendanceRecords', []));
   const [subscriptions, setSubscriptions] = useState<SubscriptionRecord[]>(() => readStoredData('subscriptions', []));
+  const [ambassadors, setAmbassadors] = useState<Ambassador[]>(() => readStoredData<Ambassador[]>('ambassadors', []));
+  const [ambassadorReferrals, setAmbassadorReferrals] = useState<AmbassadorReferral[]>(() => readStoredData<AmbassadorReferral[]>('ambassadorReferrals', []));
   const [searchTerm, setSearchTerm] = useState('');
   const [branchFilter, setBranchFilter] = useState('');
   const [gameFilter, setGameFilter] = useState('');
@@ -145,6 +164,14 @@ export default function Players() {
   }, [subscriptions]);
 
   useEffect(() => {
+    window.localStorage.setItem('ambassadors', JSON.stringify(ambassadors));
+  }, [ambassadors]);
+
+  useEffect(() => {
+    window.localStorage.setItem('ambassadorReferrals', JSON.stringify(ambassadorReferrals));
+  }, [ambassadorReferrals]);
+
+  useEffect(() => {
     const sync = () => {
       setPlayers(readStoredData('players', []));
       setBranches(readStoredData('branches', []));
@@ -152,6 +179,8 @@ export default function Players() {
       setSchedules(readStoredData('trainingSchedules', []));
       setAttendance(readStoredData('attendanceRecords', []));
       setSubscriptions(readStoredData('subscriptions', []));
+      setAmbassadors(readStoredData<Ambassador[]>('ambassadors', []));
+      setAmbassadorReferrals(readStoredData<AmbassadorReferral[]>('ambassadorReferrals', []));
     };
     window.addEventListener('storage', sync);
     return () => window.removeEventListener('storage', sync);
@@ -264,6 +293,33 @@ export default function Players() {
     setFormError(null);
   };
 
+  const getReferralSport = (player: Player) => {
+    const game = (player.game || '').toLowerCase();
+    if (game.includes('سباحة') || game.includes('swimming')) return 'swimming';
+    if (game.includes('قدم') || game.includes('football') || game.includes('soccer')) return 'football';
+    return game || 'football';
+  };
+
+  const buildAmbassadorReferral = (player: Player, ambId: string): AmbassadorReferral => {
+    const normalizedAmbId = ambId.trim();
+    return {
+      playerId: player.id,
+      AmbId: normalizedAmbId,
+      Name: player.name,
+      Age: player.age || 0,
+      Sport: getReferralSport(player),
+      Activity: 'group',
+      Subscription: {
+        plan: player.subscription?.plan || 'monthly',
+        status: player.subscription?.status || 'active',
+        value: player.subscription?.value || 0,
+      },
+      Joined: true,
+      RefPointsCounted: false,
+      JoinedDate: player.joinDate || new Date().toLocaleDateString('ar-EG'),
+    };
+  };
+
   const handleSavePlayer = () => {
     if (!formState.name.trim()) {
       setFormError('أدخل اسم اللاعب');
@@ -310,6 +366,15 @@ export default function Players() {
       setPlayers((prev) => [...prev, normalized]);
     }
 
+    const selectedAmbassadorId = formState.ambId.trim();
+    setAmbassadorReferrals((prev) => {
+      const updated = prev.filter((entry) => entry.playerId !== normalized.id);
+      if (selectedAmbassadorId) {
+        updated.push(buildAmbassadorReferral(normalized, selectedAmbassadorId));
+      }
+      return updated;
+    });
+
     setToastMessage('تم حفظ اللاعب بنجاح');
     handleClosePlayerModal();
   };
@@ -319,6 +384,7 @@ export default function Players() {
     if (!idToDelete) return;
     if (!window.confirm('هل تريد حذف هذا اللاعب؟')) return;
     setPlayers((prev) => prev.filter((player) => player.id !== idToDelete));
+    setAmbassadorReferrals((prev) => prev.filter((entry) => entry.playerId !== idToDelete));
     setToastMessage('تم حذف اللاعب');
     if (!playerId) handleClosePlayerModal();
   };
@@ -781,13 +847,19 @@ export default function Players() {
                       </select>
                     </label>
                     <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                      رمز السفير
-                      <input
+                      السفير
+                      <select
                         value={formState.ambId}
                         onChange={(event) => setFormState((prev) => ({ ...prev, ambId: event.target.value }))}
-                        placeholder="REF1234"
                         className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
-                      />
+                      >
+                        <option value="">-- اختر سفير --</option>
+                        {ambassadors.map((ambassador) => (
+                          <option key={ambassador.RefCode} value={ambassador.RefCode}>
+                            {ambassador.AmbName} ({ambassador.RefCode})
+                          </option>
+                        ))}
+                      </select>
                     </label>
                   </div>
                   <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">

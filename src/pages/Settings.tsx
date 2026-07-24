@@ -1,6 +1,7 @@
 import { type ChangeEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { SearchSm, Settings01 } from '@untitledui/icons';
 import AppIcon from '@/components/AppIcon';
+import { API_BASE_URL } from '@/api';
 
 type TabKey = 'general' | 'financial' | 'invoices' | 'security' | 'landing' | 'backup' | 'audit';
 
@@ -110,8 +111,7 @@ function broadcastLandingChange(key: string, value: unknown) {
     bc.close();
   } catch {}
   try {
-    const apiBase = import.meta.env.VITE_API_BASE || 'https://egyacaback.vercel.app';
-    fetch(`${apiBase}/api/landing-settings`, {
+    fetch(`${API_BASE_URL}/api/landing-settings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ [key]: value }),

@@ -4,6 +4,8 @@ type ApiResponse<T = unknown> = {
   success?: boolean;
 };
 
+export const API_BASE_URL = 'https://egyacaback.vercel.app';
+
 function getStoredToken() {
   if (typeof window === 'undefined') return null;
   return window.localStorage.getItem('api_token');
@@ -20,8 +22,7 @@ function saveStoredToken(token: string | null) {
 
 function resolveApiUrl(url: string) {
   const normalized = url.startsWith('/api') ? url : `/api${url.startsWith('/') ? url : `/${url}`}`;
-  const base = import.meta.env.VITE_API_BASE || 'https://egyacaback.vercel.app';
-  return `${base}${normalized}`;
+  return `${API_BASE_URL}${normalized}`;
 }
 
 async function request<T = unknown>(url: string, options: RequestInit = {}) {

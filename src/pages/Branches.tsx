@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Folder, SearchSm } from '@untitledui/icons';
 import AppIcon from '@/components/AppIcon';
 import { useAuth } from '@/contexts/AuthContext';
+import { API_BASE_URL } from '@/api';
 
 type Branch = {
   id: string;
@@ -74,7 +75,7 @@ function getApiToken() {
 
 function resolveApiUrl(url: string) {
   const normalized = url.startsWith('/api') ? url : `/api${url.startsWith('/') ? url : `/${url}`}`;
-  return `${import.meta.env.VITE_API_BASE || ''}${normalized}`;
+  return `${API_BASE_URL}${normalized}`;
 }
 
 async function fetchJson<T = unknown>(url: string, options: RequestInit = {}) {

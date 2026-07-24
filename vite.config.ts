@@ -8,13 +8,4 @@ export default defineConfig({
   resolve: {
     alias: [{ find: /^@\/(.*)$/, replacement: `${fileURLToPath(new URL('./src', import.meta.url))}/$1` }],
   },
-  server: {
-    proxy: {
-      '/api': {
-        target: 'https://egyacaback.vercel.app',
-        changeOrigin: true,
-        secure: false,
-      },
-    },
-  },
 })

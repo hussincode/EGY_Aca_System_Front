@@ -803,7 +803,7 @@ export default function Subscriptions() {
     if (!canvas) return;
     const imgData = canvas.toDataURL('image/jpeg', 0.9);
     const caption = `*فاتورة اشتراك رقمية*\n\nاللاعب: ${currentInvoice.player}\nاللعبة: ${currentInvoice.game}\nالمبلغ المدفوع: ${currentInvoice.paidAmount} ج.م\nالمتبقي: ${getSubscriptionRemaining(currentInvoice)} ج.م\nتاريخ الانتهاء: ${currentInvoice.endDate}\n\nشكراً لاشتراككم معنا في إيجي سبورتنج كلوب ⚽`;
-    if (window.api?.getToken && typeof window.api.sendInvoiceNotification === 'function') {
+    if (window.api && typeof window.api.sendInvoiceNotification === 'function') {
       try {
         await window.api.sendInvoiceNotification(phone, imgData, caption);
         showToast('تم إرسال الفاتورة بنجاح ✅', 'success');

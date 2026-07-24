@@ -20,7 +20,7 @@ function saveStoredToken(token: string | null) {
 
 function resolveApiUrl(url: string) {
   const normalized = url.startsWith('/api') ? url : `/api${url.startsWith('/') ? url : `/${url}`}`;
-  const base = import.meta.env.VITE_API_BASE || (typeof window !== 'undefined' && window.location.hostname === 'localhost' ? '' : 'https://egyacaback.vercel.app');
+  const base = import.meta.env.VITE_API_BASE || 'https://egyacaback.vercel.app';
   return `${base}${normalized}`;
 }
 

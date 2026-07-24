@@ -813,7 +813,7 @@ export default function Settings() {
               </div>
               <div className="flex items-center gap-3">
                 <a
-                  href="http://localhost:5173"
+                  href="https://egyacaback.vercel.app"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-2 rounded-2xl bg-sky-600 px-5 py-3 text-sm font-semibold text-white shadow-lg transition hover:bg-sky-500"

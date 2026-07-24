@@ -70,6 +70,13 @@ type LandingNewsItem = {
   image: string;
 };
 
+type LandingSportItem = {
+  name: string;
+  tag: string;
+  desc: string;
+  image: string;
+};
+
 type AuditLog = {
   createdAt: string;
   userName: string;
@@ -103,7 +110,8 @@ function broadcastLandingChange(key: string, value: unknown) {
     bc.close();
   } catch {}
   try {
-    fetch('http://localhost:5000/api/landing-settings', {
+    const apiBase = import.meta.env.VITE_API_BASE || 'https://egyacaback.vercel.app';
+    fetch(`${apiBase}/api/landing-settings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ [key]: value }),
@@ -178,6 +186,12 @@ export default function Settings() {
   const [newsItems, setNewsItems] = useState<LandingNewsItem[]>(() => readJson('landing_news', []));
   const [editingNewsIndex, setEditingNewsIndex] = useState<number>(-1);
   const [sportName, setSportName] = useState('');
+  const [sportTag, setSportTag] = useState('');
+  const [sportDesc, setSportDesc] = useState('');
+  const [sportImage, setSportImage] = useState('');
+  const [sportImagePreview, setSportImagePreview] = useState('');
+  const [landingSports, setLandingSports] = useState<LandingSportItem[]>(() => readJson('landing_sports', []));
+  const [sectionTitle, setSectionTitle] = useState(() => readString('landing_sports_title'));
   const [branchNameSetting, setBranchNameSetting] = useState('');
 
   useEffect(() => {
@@ -560,6 +574,42 @@ export default function Settings() {
     writeJson('landing_news', next);
   };
 
+  const uploadSportImage = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = e.target?.result;
+      if (typeof result === 'string') {
+        setSportImage(result);
+        setSportImagePreview(result);
+      }
+    };
+    reader.readAsDataURL(file);
+    event.target.value = '';
+  };
+
+  const addLandingSport = () => {
+    if (!sportName.trim()) { showToast('يرجى إدخال اسم الرياضة', 'error'); return; }
+    const item: LandingSportItem = { name: sportName.trim(), tag: sportTag.trim(), desc: sportDesc.trim(), image: sportImage };
+    const next = [item, ...landingSports];
+    setLandingSports(next);
+    writeJson('landing_sports', next);
+    setSportName(''); setSportTag(''); setSportDesc(''); setSportImage(''); setSportImagePreview('');
+    showToast('تمت إضافة الرياضة بنجاح', 'success');
+  };
+
+  const deleteLandingSport = (index: number) => {
+    const next = landingSports.filter((_, i) => i !== index);
+    setLandingSports(next);
+    writeJson('landing_sports', next);
+  };
+
+  const saveSportsTitle = () => {
+    writeString('landing_sports_title', sectionTitle);
+    showToast('تم حفظ عنوان قسم الرياضات', 'success');
+  };
+
   const tabButtonClass = (tab: TabKey) => `rounded-2xl border px-4 py-3 text-sm font-semibold transition ${activeTab === tab ? 'border-sky-600 bg-sky-600 text-white' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`;
 
   const tabContentClass = 'space-y-6';
@@ -867,6 +917,97 @@ export default function Settings() {
                 </label>
                 {ceoPhotoPreview ? <img src={ceoPhotoPreview} alt="CEO preview" className="h-32 rounded-2xl border border-slate-200 object-cover" /> : null}
                 <button type="button" className="rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700" onClick={saveCeoBiographySettings}>حفظ صورة السيرة الذاتية</button>
+              </div>
+            </div>
+          </div>
+
+          {/* ===== قسم الرياضات ===== */}
+          <div className="rounded-3xl bg-white p-6 shadow-sm shadow-slate-200 ring-1 ring-slate-200/70">
+            <div className="mb-6 border-b border-slate-200 pb-4">
+              <h2 className="text-xl font-semibold text-slate-900">إدارة قسم الرياضات</h2>
+              <p className="mt-1 text-xs text-slate-500">أضف رياضات مخصصة تظهر في قسم الرياضات بالصفحة الرئيسية، وعدّل عنوان القسم.</p>
+            </div>
+
+            {/* عنوان القسم */}
+            <div className="mb-6 space-y-3">
+              <label className="block text-sm font-medium text-slate-700">عنوان قسم الرياضات (يظهر في الصفحة)</label>
+              <div className="flex gap-3">
+                <input
+                  value={sectionTitle}
+                  onChange={(e) => setSectionTitle(e.target.value)}
+                  className="flex-1 rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
+                  placeholder="مثلاً: سبع رياضات، معيار واحد."
+                />
+                <button type="button" className="rounded-2xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700" onClick={saveSportsTitle}>
+                  حفظ العنوان
+                </button>
+              </div>
+            </div>
+
+            <div className="grid gap-6 lg:grid-cols-2">
+              {/* فورم إضافة رياضة */}
+              <div className="space-y-4 rounded-2xl border border-slate-100 bg-slate-50 p-5">
+                <h3 className="font-semibold text-slate-800">إضافة رياضة جديدة</h3>
+                <input
+                  value={sportName}
+                  onChange={(e) => setSportName(e.target.value)}
+                  className="w-full rounded-3xl border border-slate-200 bg-white px-4 py-3 text-right text-sm text-slate-900 outline-none"
+                  placeholder="اسم الرياضة (مثلاً: كرة القدم)"
+                />
+                <input
+                  value={sportTag}
+                  onChange={(e) => setSportTag(e.target.value)}
+                  className="w-full rounded-3xl border border-slate-200 bg-white px-4 py-3 text-right text-sm text-slate-900 outline-none"
+                  placeholder="تصنيف (مثلاً: جماعي · خارجي)"
+                />
+                <textarea
+                  value={sportDesc}
+                  onChange={(e) => setSportDesc(e.target.value)}
+                  rows={2}
+                  className="w-full rounded-3xl border border-slate-200 bg-white px-4 py-3 text-right text-sm text-slate-900 outline-none resize-none"
+                  placeholder="وصف مختصر للرياضة"
+                />
+                <label className="flex cursor-pointer items-center justify-center gap-2 rounded-3xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
+                  <span>{sportImagePreview ? '✓ تم رفع الصورة' : 'رفع صورة الرياضة'}</span>
+                  <input type="file" accept="image/*" hidden onChange={uploadSportImage} />
+                </label>
+                {sportImagePreview && (
+                  <img src={sportImagePreview} alt="Sport preview" className="h-24 w-full rounded-2xl border border-slate-200 object-cover" />
+                )}
+                <button type="button" className="w-full rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700" onClick={addLandingSport}>
+                  + إضافة الرياضة
+                </button>
+              </div>
+
+              {/* قائمة الرياضات */}
+              <div className="overflow-hidden rounded-2xl border border-slate-200">
+                <div className="bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  الرياضات المضافة ({landingSports.length})
+                </div>
+                {landingSports.length === 0 ? (
+                  <p className="px-4 py-8 text-center text-sm text-slate-400">لا توجد رياضات مخصصة — سيتم عرض الرياضات الافتراضية</p>
+                ) : (
+                  <div className="divide-y divide-slate-100">
+                    {landingSports.map((sport, index) => (
+                      <div key={`${sport.name}-${index}`} className="flex items-center gap-3 px-4 py-3">
+                        {sport.image && (
+                          <img src={sport.image} alt={sport.name} className="h-10 w-10 rounded-xl object-cover shrink-0" />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-slate-900 text-sm truncate">{sport.name}</p>
+                          {sport.tag && <p className="text-xs text-slate-400 truncate">{sport.tag}</p>}
+                        </div>
+                        <button
+                          type="button"
+                          className="shrink-0 rounded-xl bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-600 transition hover:bg-rose-100"
+                          onClick={() => deleteLandingSport(index)}
+                        >
+                          حذف
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>

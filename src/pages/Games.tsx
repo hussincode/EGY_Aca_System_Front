@@ -20,24 +20,37 @@ type GameFormState = {
 const DEFAULT_ICON = 'fa-solid fa-futbol';
 
 const sportsIcons = [
-  'fa-solid fa-futbol',
-  'fa-solid fa-basketball',
-  'fa-solid fa-volleyball',
-  'fa-solid fa-person-swimming',
-  'fa-solid fa-table-tennis-paddle-ball',
-  'fa-solid fa-person-running',
-  'fa-solid fa-dumbbell',
-  'fa-solid fa-user-ninja',
-  'fa-solid fa-chess',
-  'fa-solid fa-medal',
-  'fa-solid fa-trophy',
-  'fa-solid fa-bicycle',
-  'fa-solid fa-skating',
-  'fa-solid fa-bowling-ball',
-  'fa-solid fa-baseball-bat-ball',
-  'fa-solid fa-golf-ball-tee',
-  'fa-solid fa-hockey-puck',
+  { value: 'fa-solid fa-futbol', glyph: '⚽', label: 'كرة القدم' },
+  { value: 'fa-solid fa-basketball', glyph: '🏀', label: 'كرة السلة' },
+  { value: 'fa-solid fa-volleyball', glyph: '🏐', label: 'الكرة الطائرة' },
+  { value: 'fa-solid fa-person-swimming', glyph: '🏊', label: 'السباحة' },
+  { value: 'fa-solid fa-table-tennis-paddle-ball', glyph: '🏓', label: 'تنس الطاولة' },
+  { value: 'fa-solid fa-person-running', glyph: '🏃', label: 'الجري' },
+  { value: 'fa-solid fa-dumbbell', glyph: '🏋️', label: 'كمال الأجسام' },
+  { value: 'fa-solid fa-user-ninja', glyph: '🥋', label: 'الكاراتيه' },
+  { value: 'fa-solid fa-chess', glyph: '♟️', label: 'الشطرنج' },
+  { value: 'fa-solid fa-medal', glyph: '🏅', label: 'رياضة عامة' },
+  { value: 'fa-solid fa-bicycle', glyph: '🚴', label: 'ركوب الدراجات' },
+  { value: 'fa-solid fa-golf-ball-tee', glyph: '🏌️', label: 'الجولف' },
+  { value: 'fa-solid fa-hockey-puck', glyph: '🏒', label: 'هوكي' },
 ];
+
+function resolveSportIcon(iconName: string | undefined, gameName = '') {
+  const selected = sportsIcons.find((item) => item.value === iconName);
+  if (selected) return selected;
+
+  const normalizedName = gameName.toLowerCase();
+  if (normalizedName.includes('قدم') || normalizedName.includes('football')) return sportsIcons[0];
+  if (normalizedName.includes('سلة') || normalizedName.includes('basket')) return sportsIcons[1];
+  if (normalizedName.includes('طائرة') || normalizedName.includes('volley')) return sportsIcons[2];
+  if (normalizedName.includes('سباحة') || normalizedName.includes('swim')) return sportsIcons[3];
+  if (normalizedName.includes('تنس') || normalizedName.includes('tennis')) return sportsIcons[4];
+  if (normalizedName.includes('جري') || normalizedName.includes('run')) return sportsIcons[5];
+  if (normalizedName.includes('جيم') || normalizedName.includes('gym')) return sportsIcons[6];
+  if (normalizedName.includes('كاراتيه') || normalizedName.includes('karate')) return sportsIcons[7];
+  if (normalizedName.includes('شطرنج') || normalizedName.includes('chess')) return sportsIcons[8];
+  return sportsIcons[9];
+}
 
 function readStoredData<T>(key: string, fallback: T): T {
   if (typeof window === 'undefined') return fallback;
@@ -253,10 +266,13 @@ export default function Games() {
               ) : (
                 filteredGames.map((game) => {
                   const playersCount = players.filter((player) => player.game === game.name).length;
+                  const gameIcon = resolveSportIcon(game.icon, game.name);
                   return (
                     <tr key={game.id}>
                       <td className="px-4 py-3 text-slate-700">
-                        <i className={game.icon || DEFAULT_ICON} />
+                        <span className="text-2xl leading-none" role="img" aria-label={gameIcon.label}>
+                          {gameIcon.glyph}
+                        </span>
                       </td>
                       <td className="px-4 py-3 font-semibold text-slate-900">{game.name}</td>
                       <td className="px-4 py-3 text-slate-600">{game.description || '-'}</td>
@@ -328,16 +344,18 @@ export default function Games() {
               <div>
                 <p className="mb-3 text-sm text-slate-700">اختر أيقونة اللعبة</p>
                 <div className="grid max-h-[220px] grid-cols-5 gap-3 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50 p-3">
-                  {sportsIcons.map((icon) => (
+                  {sportsIcons.map(({ value, glyph, label }) => (
                     <button
-                      key={icon}
+                      key={value}
                       type="button"
-                      onClick={() => setFormState((prev) => ({ ...prev, icon }))}
+                      onClick={() => setFormState((prev) => ({ ...prev, icon: value }))}
                       className={`flex h-11 items-center justify-center rounded-xl border text-lg transition ${
-                        formState.icon === icon ? 'border-sky-600 bg-sky-600 text-white' : 'border-slate-200 bg-white text-slate-500 hover:border-sky-400 hover:text-sky-600'
+                        formState.icon === value ? 'border-sky-600 bg-sky-600 text-white' : 'border-slate-200 bg-white text-slate-500 hover:border-sky-400 hover:text-sky-600'
                       }`}
                     >
-                      <i className={icon} />
+                      <span className="text-2xl leading-none" role="img" aria-label={label}>
+                        {glyph}
+                      </span>
                     </button>
                   ))}
                 </div>

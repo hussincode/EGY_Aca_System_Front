@@ -463,7 +463,7 @@ export default function Subscriptions() {
     const existingSubscription = subscriptions.find((sub) => sub.id === formState.id);
     const paymentDelta = Math.max(0, formState.paidAmount - Number(existingSubscription?.paidAmount || 0));
 
-    const subscription: SubscriptionRecord = {
+    let subscription: SubscriptionRecord = {
       id: formState.id || createStableId('sub'),
       playerId: selectedPlayer?.id || '',
       player: selectedPlayer?.name || '',
@@ -495,7 +495,11 @@ export default function Subscriptions() {
         if (formState.id) {
           await api.updateSubscription?.(subscription.id, subscription);
         } else {
-          await api.createSubscription?.(subscription);
+          const response = await api.createSubscription?.(subscription);
+          const serverSubscription = (response as { data?: { id?: string } } | undefined)?.data;
+          if (serverSubscription?.id) {
+            subscription = { ...subscription, id: serverSubscription.id };
+          }
         }
       }
 
@@ -513,13 +517,6 @@ export default function Subscriptions() {
         );
         setPlayers(nextPlayers);
         saveToStorage('players', nextPlayers);
-        const api = window.api;
-        if (hasSubscriptionsApi() && api?.updatePlayer) {
-          await api.updatePlayer(selectedPlayer.id, {
-            schedule: subscription.schedule,
-            trainingTime: subscription.trainingTime,
-          });
-        }
       }
 
       closeSubscriptionModal();
@@ -1430,7 +1427,7 @@ export default function Subscriptions() {
               </button>
             </div>
             <div className="mt-6 text-center">
-              <canvas ref={invoiceCanvasRef} width={800} height={1200} className="mx-auto max-w-full rounded-3xl border border-slate-200" />
+              <canvas ref={invoiceCanvasRef} width={800} height={1200} className="mx-auto max-h-[65vh] w-auto max-w-full rounded-3xl border border-slate-200" />
             </div>
             <div className="mt-6 flex flex-wrap justify-center gap-3">
               <button

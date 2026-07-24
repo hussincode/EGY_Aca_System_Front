@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
 
 type Game = {
   id: string;
@@ -64,6 +65,8 @@ function dedupeGames(items: Game[]): Game[] {
 }
 
 export default function Games() {
+  const { canEdit } = useAuth();
+  const canEditGames = canEdit('games');
   const [games, setGames] = useState<Game[]>(() => dedupeGames(readStoredData<Game[]>('games', [])));
   const [players] = useState<Array<{ game?: string }>>(() => readStoredData<Array<{ game?: string }>>('players', []));
   const [search, setSearch] = useState('');
@@ -214,13 +217,15 @@ export default function Games() {
               placeholder="بحث عن لعبة..."
               className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-700"
             />
-            <button
-              type="button"
-              onClick={openAddModal}
-              className="rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700"
-            >
-              + إضافة لعبة
-            </button>
+            {canEditGames && (
+              <button
+                type="button"
+                onClick={openAddModal}
+                className="rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700"
+              >
+                + إضافة لعبة
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -263,12 +268,16 @@ export default function Games() {
                       <td className="px-4 py-3 text-slate-600">{playersCount}</td>
                       <td className="px-4 py-3">
                         <div className="flex justify-center gap-2">
-                          <button type="button" onClick={() => openEditModal(game)} className="rounded-xl bg-violet-600 px-3 py-2 text-sm font-semibold text-white">
-                            تعديل
-                          </button>
-                          <button type="button" onClick={() => deleteGame(game.id)} className="rounded-xl bg-rose-600 px-3 py-2 text-sm font-semibold text-white">
-                            حذف
-                          </button>
+                          {canEditGames && (
+                            <button type="button" onClick={() => openEditModal(game)} className="rounded-xl bg-violet-600 px-3 py-2 text-sm font-semibold text-white">
+                              تعديل
+                            </button>
+                          )}
+                          {canEditGames && (
+                            <button type="button" onClick={() => deleteGame(game.id)} className="rounded-xl bg-rose-600 px-3 py-2 text-sm font-semibold text-white">
+                              حذف
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

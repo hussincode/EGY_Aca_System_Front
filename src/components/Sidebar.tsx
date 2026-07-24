@@ -1,45 +1,56 @@
-import { BarChartSquare02, Folder, HomeLine, MessageChatCircle, PieChart03, Rows01, Settings01 } from "@untitledui/icons";
+import { BarChartSquare02, Folder, HomeLine, MessageChatCircle, PieChart03, Rows01, Settings01, Users01 } from "@untitledui/icons";
 import { NavLink, useNavigate } from "react-router-dom";
 import { type Dispatch, type SetStateAction, useState } from "react";
 import logo from "@/assets/logo.jpg";
 import AppIcon from "@/components/AppIcon";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface SidebarProps {
     isOpen: boolean;
     setIsOpen: Dispatch<SetStateAction<boolean>>;
 }
 
-const sidebarSections = [
+const ALL_SECTIONS = [
     {
         label: "القائمة الرئيسية",
         items: [
-            { label: "لوحة التحكم", to: "/", icon: BarChartSquare02 },
-            { label: "اللاعبين", to: "/players", icon: HomeLine },
-            { label: "المدربين والموظفين", to: "/staff", icon: MessageChatCircle },
-            { label: "الفروع", to: "/branches", icon: Folder },
-            { label: "السفراء", to: "/ambassadors", icon: Rows01 },
-            { label: "العملاء المحتملين", to: "/leads", icon: MessageChatCircle },
-            { label: "الألعاب", to: "/games", icon: PieChart03 },
-            { label: "الاشتراكات", to: "/subscriptions", icon: Rows01 },
-            { label: "الحضور", to: "/attendance", icon: Settings01 },
+            { label: "لوحة التحكم",            to: "/",              icon: BarChartSquare02 },
+            { label: "اللاعبين",               to: "/players",       icon: HomeLine },
+            { label: "المدربين والموظفين",      to: "/staff",         icon: MessageChatCircle },
+            { label: "الفروع",                 to: "/branches",      icon: Folder },
+            { label: "السفراء",                to: "/ambassadors",   icon: Rows01 },
+            { label: "العملاء المحتملين",       to: "/leads",         icon: MessageChatCircle },
+            { label: "الألعاب",                to: "/games",         icon: PieChart03 },
+            { label: "الاشتراكات",             to: "/subscriptions", icon: Rows01 },
+            { label: "الحضور",                 to: "/attendance",    icon: Settings01 },
         ],
     },
     {
         label: "المالية",
         items: [
-            { label: "الإيرادات والمصروفات", to: "/financ", icon: BarChartSquare02 },
-            { label: "المتجر", to: "/store-synced", icon: Folder },
+            { label: "الإيرادات والمصروفات",   to: "/financ",        icon: BarChartSquare02 },
+            { label: "المتجر",                 to: "/store-synced",  icon: Folder },
         ],
     },
     {
         label: "الإدارة",
-        items: [{ label: "المستخدمين", to: "/users", icon: Settings01 }],
+        items: [
+            { label: "المستخدمين",             to: "/users",         icon: Users01 },
+        ],
     },
 ];
+
+const ROLE_LABELS: Record<string, string> = {
+    admin:      'مدير النظام',
+    manager:    'مدير',
+    coach:      'مدرب',
+    accountant: 'محاسب',
+};
 
 const Sidebar = ({ isOpen, setIsOpen }: SidebarProps) => {
     const [isHovered, setIsHovered] = useState(false);
     const navigate = useNavigate();
+    const { user, role, hasPageAccess } = useAuth();
     const expanded = isOpen || isHovered;
 
     const handleLogout = () => {
@@ -49,6 +60,14 @@ const Sidebar = ({ isOpen, setIsOpen }: SidebarProps) => {
     };
 
     const mobileClose = () => setIsOpen(false);
+
+    // Filter sections so only permitted pages appear
+    const visibleSections = ALL_SECTIONS
+        .map((section) => ({
+            ...section,
+            items: section.items.filter((item) => hasPageAccess(item.to)),
+        }))
+        .filter((section) => section.items.length > 0);
 
     return (
         <>
@@ -76,18 +95,28 @@ const Sidebar = ({ isOpen, setIsOpen }: SidebarProps) => {
                         إغلاق
                     </button>
                 </div>
+
+                {/* Logo + Academy name */}
                 <div className="mb-10 transition-all duration-300">
-                    <div className={`flex items-center gap-3 ${isOpen || isHovered ? "justify-start" : "justify-center"}`}>
+                    <div className={`flex items-center gap-3 ${expanded ? "justify-start" : "justify-center"}`}>
                         <img src={logo} alt="Academy Logo" className="h-10 w-10 rounded-xl object-cover" />
-                        <div className={`${isOpen || isHovered ? "block" : "hidden"}`}>
+                        <div className={`${expanded ? "block" : "hidden"}`}>
                             <h2 className="text-2xl font-semibold">ايجي سبورتنج كلوب</h2>
                             <p className="mt-1 text-sm text-slate-400">نظام الإدارة</p>
                         </div>
                     </div>
                 </div>
 
+                {/* Logged-in user info */}
+                {user && expanded && (
+                    <div className="mb-6 rounded-2xl border border-slate-800 bg-slate-900 px-4 py-3">
+                        <p className="text-sm font-semibold text-white truncate">{user.name}</p>
+                        <p className="mt-0.5 text-xs text-slate-400">{ROLE_LABELS[role ?? ''] ?? role}</p>
+                    </div>
+                )}
+
                 <nav className="space-y-6">
-                    {sidebarSections.map((section) => (
+                    {visibleSections.map((section) => (
                         <div key={section.label}>
                             <div className={`${expanded ? "mb-3 text-xs font-semibold uppercase tracking-[0.15em] text-slate-500" : "hidden"}`}>
                                 {section.label}
@@ -99,6 +128,7 @@ const Sidebar = ({ isOpen, setIsOpen }: SidebarProps) => {
                                         <li key={item.to}>
                                             <NavLink
                                                 to={item.to}
+                                                end={item.to === '/'}
                                                 className={({ isActive }) =>
                                                     `group flex items-center gap-3 rounded-2xl px-3 py-3 text-sm font-medium transition ${
                                                         isActive
@@ -106,6 +136,7 @@ const Sidebar = ({ isOpen, setIsOpen }: SidebarProps) => {
                                                             : "text-slate-300 hover:bg-slate-900 hover:text-white"
                                                     } ${expanded ? "justify-start" : "justify-center"}`
                                                 }
+                                                onClick={() => setIsOpen(false)}
                                             >
                                                 <AppIcon icon={Icon} className="group-hover:text-slate-200" />
                                                 <span className={`${expanded ? "block" : "hidden"} text-sm`}>{item.label}</span>
@@ -120,13 +151,15 @@ const Sidebar = ({ isOpen, setIsOpen }: SidebarProps) => {
 
                 <div className={`mt-8 border-t border-slate-800 pt-4 transition-all duration-300 ${expanded ? "block" : "hidden"}`}>
                     <div className="space-y-2 text-sm text-slate-300">
-                        <NavLink
-                            to="/settings"
-                            className="flex items-center gap-3 rounded-2xl bg-slate-900 px-3 py-3 text-white transition hover:bg-slate-800"
-                        >
-                            <AppIcon icon={Settings01} className="text-slate-300" />
-                            إعدادات النظام
-                        </NavLink>
+                        {hasPageAccess('/settings') && (
+                            <NavLink
+                                to="/settings"
+                                className="flex items-center gap-3 rounded-2xl bg-slate-900 px-3 py-3 text-white transition hover:bg-slate-800"
+                            >
+                                <AppIcon icon={Settings01} className="text-slate-300" />
+                                إعدادات النظام
+                            </NavLink>
+                        )}
                         <button
                             type="button"
                             onClick={handleLogout}

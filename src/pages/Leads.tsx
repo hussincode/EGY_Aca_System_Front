@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '@/contexts/AuthContext';
 
 type LeadStatus = 'new' | 'contact' | 'trial' | 'interested' | 'not' | 'convert';
 type LeadScore = 'hot' | 'mid' | 'cold';
@@ -156,6 +157,8 @@ function getStatusClasses(status?: LeadStatus) {
 }
 
 export default function Leads() {
+  const { canEdit } = useAuth();
+  const canEditLeads = canEdit('leads');
   const navigate = useNavigate();
   const [leads, setLeads] = useState<Lead[]>(() => readStoredData(LEADS_KEY, []).map(normalizeLead));
   const [searchTerm, setSearchTerm] = useState('');
@@ -472,13 +475,15 @@ export default function Leads() {
             <h1 className="mt-2 text-3xl font-semibold text-slate-900">العملاء المحتملين</h1>
           </div>
           <div className="flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={openAddModal}
-              className="rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700"
-            >
-              + إضافة عميل
-            </button>
+            {canEditLeads && (
+              <button
+                type="button"
+                onClick={openAddModal}
+                className="rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700"
+              >
+                + إضافة عميل
+              </button>
+            )}
             <button
               type="button"
               onClick={() => {
@@ -683,15 +688,21 @@ export default function Leads() {
                         <button type="button" onClick={() => handleSendLeadWhatsApp(lead.phone, lead.name)} className="rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white">
                           واتساب
                         </button>
-                        <button type="button" onClick={() => handleConvertToClient(lead)} className="rounded-xl bg-sky-600 px-3 py-2 text-sm font-semibold text-white">
-                          تحويل
-                        </button>
-                        <button type="button" onClick={() => openEditModal(lead)} className="rounded-xl bg-violet-600 px-3 py-2 text-sm font-semibold text-white">
-                          تعديل
-                        </button>
-                        <button type="button" onClick={() => handleRemoveLead(lead.id)} className="rounded-xl bg-rose-600 px-3 py-2 text-sm font-semibold text-white">
-                          حذف
-                        </button>
+                        {canEditLeads && (
+                          <button type="button" onClick={() => handleConvertToClient(lead)} className="rounded-xl bg-sky-600 px-3 py-2 text-sm font-semibold text-white">
+                            تحويل
+                          </button>
+                        )}
+                        {canEditLeads && (
+                          <button type="button" onClick={() => openEditModal(lead)} className="rounded-xl bg-violet-600 px-3 py-2 text-sm font-semibold text-white">
+                            تعديل
+                          </button>
+                        )}
+                        {canEditLeads && (
+                          <button type="button" onClick={() => handleRemoveLead(lead.id)} className="rounded-xl bg-rose-600 px-3 py-2 text-sm font-semibold text-white">
+                            حذف
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

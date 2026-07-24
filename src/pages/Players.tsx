@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Bell03, SearchSm, Phone01, CalendarCheck01, Gift02 } from '@untitledui/icons';
 import AppIcon from '@/components/AppIcon';
 import type { Ambassador } from '../types/ambassador';
+import { useAuth } from '@/contexts/AuthContext';
 
 type SubscriptionPlan = 'monthly' | '3months' | '6months';
 
@@ -657,6 +658,9 @@ export default function Players() {
     </tr>
   );
 
+  const { canEdit } = useAuth();
+  const canEditPlayers = canEdit('players');
+
   return (
     <div className="space-y-6">
       <div className="rounded-3xl bg-white p-6 shadow-sm shadow-slate-200 ring-1 ring-slate-200/70">
@@ -678,14 +682,16 @@ export default function Players() {
               <AppIcon icon={Gift02} className="text-white" />
               تقرير الالتزام
             </button>
-            <button
-              type="button"
-              onClick={() => handleOpenPlayerModal()}
-              className="inline-flex items-center gap-2 rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700"
-            >
-              <span className="text-lg">+</span>
-              إضافة لاعب
-            </button>
+            {canEditPlayers && (
+              <button
+                type="button"
+                onClick={() => handleOpenPlayerModal()}
+                className="inline-flex items-center gap-2 rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700"
+              >
+                <span className="text-lg">+</span>
+                إضافة لاعب
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -740,17 +746,19 @@ export default function Players() {
               <option value="">كل اللاعبين</option>
               <option value="no-sub">بدون اشتراك نشط</option>
             </select>
-            <button
-              type="button"
-              onClick={() => {
-                const removedCount = players.filter((player) => !player.branch || !player.branch.trim()).length;
-                setPlayers((prev) => prev.filter((player) => Boolean(player.branch && player.branch.trim())));
-                setToastMessage(removedCount > 0 ? `تم حذف ${removedCount} لاعب بدون فرع` : 'لا يوجد لاعبين بدون فرع');
-              }}
-              className="rounded-3xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 transition hover:bg-rose-100"
-            >
-              حذف لاعبين بدون فرع
-            </button>
+            {canEditPlayers && (
+              <button
+                type="button"
+                onClick={() => {
+                  const removedCount = players.filter((player) => !player.branch || !player.branch.trim()).length;
+                  setPlayers((prev) => prev.filter((player) => Boolean(player.branch && player.branch.trim())));
+                  setToastMessage(removedCount > 0 ? `تم حذف ${removedCount} لاعب بدون فرع` : 'لا يوجد لاعبين بدون فرع');
+                }}
+                className="rounded-3xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 transition hover:bg-rose-100"
+              >
+                حذف لاعبين بدون فرع
+              </button>
+            )}
             <button
               type="button"
               onClick={assignCodesToExistingPlayers}
@@ -832,20 +840,24 @@ export default function Players() {
                       <td className="px-4 py-4 text-right">-</td>
                       <td className="px-4 py-4 text-center">
                         <div className="inline-flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleOpenPlayerModal(player)}
-                            className="rounded-2xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-200"
-                          >
-                            تعديل
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeletePlayer(player.id)}
-                            className="rounded-2xl bg-rose-100 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-200"
-                          >
-                            حذف
-                          </button>
+                          {canEditPlayers && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenPlayerModal(player)}
+                              className="rounded-2xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-200"
+                            >
+                              تعديل
+                            </button>
+                          )}
+                          {canEditPlayers && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeletePlayer(player.id)}
+                              className="rounded-2xl bg-rose-100 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-200"
+                            >
+                              حذف
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

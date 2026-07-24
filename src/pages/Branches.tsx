@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Folder, SearchSm } from '@untitledui/icons';
 import AppIcon from '@/components/AppIcon';
+import { useAuth } from '@/contexts/AuthContext';
 
 type Branch = {
   id: string;
@@ -110,6 +111,8 @@ async function fetchJson<T = unknown>(url: string, options: RequestInit = {}) {
 }
 
 export default function Branches() {
+  const { canEdit } = useAuth();
+  const canEditBranches = canEdit('branches');
   const [branches, setBranches] = useState<Branch[]>(() => readLocalBranches());
   const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -395,13 +398,15 @@ export default function Branches() {
               className="w-full border-none bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
             />
           </div>
-          <button
-            type="button"
-            onClick={() => openBranchModal()}
-            className="inline-flex items-center justify-center rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700"
-          >
-            إضافة فرع
-          </button>
+          {canEditBranches && (
+            <button
+              type="button"
+              onClick={() => openBranchModal()}
+              className="inline-flex items-center justify-center rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700"
+            >
+              إضافة فرع
+            </button>
+          )}
         </div>
       </div>
 
@@ -438,20 +443,24 @@ export default function Branches() {
                     <td className="px-4 py-4 text-right text-slate-600">{branch.location || '-'}</td>
                     <td className="px-4 py-4 text-center">
                       <div className="flex flex-wrap justify-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => openBranchModal(branch.id)}
-                          className="rounded-2xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-200"
-                        >
-                          تعديل
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => requestDeleteBranch(branch.id)}
-                          className="rounded-2xl bg-rose-100 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-200"
-                        >
-                          حذف
-                        </button>
+                        {canEditBranches && (
+                          <button
+                            type="button"
+                            onClick={() => openBranchModal(branch.id)}
+                            className="rounded-2xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-200"
+                          >
+                            تعديل
+                          </button>
+                        )}
+                        {canEditBranches && (
+                          <button
+                            type="button"
+                            onClick={() => requestDeleteBranch(branch.id)}
+                            className="rounded-2xl bg-rose-100 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-200"
+                          >
+                            حذف
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

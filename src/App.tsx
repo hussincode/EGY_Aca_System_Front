@@ -1,4 +1,4 @@
-﻿import { useState } from 'react';
+import { useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
 import Ambassadors from './pages/Ambassadors';
@@ -15,13 +15,26 @@ import Finance from './pages/Finance';
 import StoreSynced from './pages/StoreSynced';
 import Users from './pages/Users';
 import Login from './pages/Login';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 
+/** Redirect to /login if no token present */
 function RequireAuth() {
   const location = useLocation();
   const token = typeof window !== 'undefined' ? window.api?.getToken?.() : null;
 
   if (!token) {
     return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  return <Outlet />;
+}
+
+/** Redirect to / if the current role cannot access this page */
+function RequireRole({ path }: { path: string }) {
+  const { hasPageAccess } = useAuth();
+
+  if (!hasPageAccess(path)) {
+    return <Navigate to="/" replace />;
   }
 
   return <Outlet />;
@@ -41,7 +54,6 @@ function AppLayout() {
             onClick={() => setSidebarOpen(true)}
             className="inline-flex items-center gap-2 rounded-2xl border border-slate-700 bg-slate-950/90 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:border-slate-600 hover:bg-slate-900"
           >
-  
             القائمة
           </button>
           <p className="text-sm text-slate-400">اضغط على القائمة للوصول إلى الأقسام</p>
@@ -56,28 +68,71 @@ function AppLayout() {
 function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route element={<RequireAuth />}>
-          <Route element={<AppLayout />}>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/players" element={<Players />} />
-            <Route path="/staff" element={<Staff />} />
-            <Route path="/branches" element={<Branches />} />
-            <Route path="/attendance" element={<Attendance />} />
-            <Route path="/ambassadors" element={<Ambassadors />} />
-            <Route path="/leads" element={<Leads />} />
-            <Route path="/games" element={<Games />} />
-            <Route path="/subscriptions" element={<Subscriptions />} />
-            <Route path="/financ" element={<Finance />} />
-            <Route path="/store-synced" element={<StoreSynced />} />
-            <Route path="/users" element={<Users />} />
-            <Route path="/settings" element={<Settings />} />
+      <AuthProvider>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route element={<RequireAuth />}>
+            <Route element={<AppLayout />}>
+              {/* Dashboard – accessible by all authenticated users */}
+              <Route path="/" element={<Dashboard />} />
+
+              {/* admin + manager + coach + accountant */}
+              <Route element={<RequireRole path="/players" />}>
+                <Route path="/players" element={<Players />} />
+              </Route>
+
+              <Route element={<RequireRole path="/games" />}>
+                <Route path="/games" element={<Games />} />
+              </Route>
+
+              <Route element={<RequireRole path="/subscriptions" />}>
+                <Route path="/subscriptions" element={<Subscriptions />} />
+              </Route>
+
+              <Route element={<RequireRole path="/attendance" />}>
+                <Route path="/attendance" element={<Attendance />} />
+              </Route>
+
+              {/* admin + manager only */}
+              <Route element={<RequireRole path="/staff" />}>
+                <Route path="/staff" element={<Staff />} />
+              </Route>
+
+              <Route element={<RequireRole path="/branches" />}>
+                <Route path="/branches" element={<Branches />} />
+              </Route>
+
+              <Route element={<RequireRole path="/ambassadors" />}>
+                <Route path="/ambassadors" element={<Ambassadors />} />
+              </Route>
+
+              <Route element={<RequireRole path="/leads" />}>
+                <Route path="/leads" element={<Leads />} />
+              </Route>
+
+              <Route element={<RequireRole path="/financ" />}>
+                <Route path="/financ" element={<Finance />} />
+              </Route>
+
+              <Route element={<RequireRole path="/store-synced" />}>
+                <Route path="/store-synced" element={<StoreSynced />} />
+              </Route>
+
+              <Route element={<RequireRole path="/settings" />}>
+                <Route path="/settings" element={<Settings />} />
+              </Route>
+
+              {/* admin only */}
+              <Route element={<RequireRole path="/users" />}>
+                <Route path="/users" element={<Users />} />
+              </Route>
+            </Route>
           </Route>
-        </Route>
-        <Route path="*" element={<Navigate to="/login" replace />} />
-      </Routes>
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Routes>
+      </AuthProvider>
     </BrowserRouter>
   );
 }
+
 export default App;

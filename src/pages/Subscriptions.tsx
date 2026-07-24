@@ -3,6 +3,7 @@ import { jsPDF } from 'jspdf';
 import QRCode from 'qrcode';
 import { CreditCard01, Plus, SearchSm, Wallet01 } from '@untitledui/icons';
 import AppIcon from '@/components/AppIcon';
+import { useAuth } from '@/contexts/AuthContext';
 
 type FinanceRecordLike = {
   id?: string;
@@ -167,6 +168,8 @@ function getSubscriptionRemaining(subscription: SubscriptionRecord) {
 }
 
 export default function Subscriptions() {
+  const { canEdit } = useAuth();
+  const canEditSubs = canEdit('subscriptions');
   const [players, setPlayers] = useState<Player[]>(() => readStorage('players', []));
   const [subscriptions, setSubscriptions] = useState<SubscriptionRecord[]>(() => readStorage('subscriptions', []));
   const [games, setGames] = useState<Game[]>(() => readStorage('games', []));
@@ -903,14 +906,16 @@ export default function Subscriptions() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={openAddSubscription}
-              className="inline-flex items-center gap-2 rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700"
-            >
-              <Plus className="h-4 w-4" />
-              إضافة اشتراك
-            </button>
+            {canEditSubs && (
+              <button
+                type="button"
+                onClick={openAddSubscription}
+                className="inline-flex items-center gap-2 rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700"
+              >
+                <Plus className="h-4 w-4" />
+                إضافة اشتراك
+              </button>
+            )}
             <button
               type="button"
               onClick={() => window.alert('Export غير مدعوم في النسخة الحالية')}
@@ -1095,15 +1100,17 @@ export default function Subscriptions() {
                       </td>
                       <td className="px-3 py-3">
                         <div className="grid grid-cols-2 gap-2">
-                          <button
-                            type="button"
-                            onClick={() => openEditSubscription(sub)}
-                            disabled={isCancelled}
-                            className="rounded-2xl bg-violet-600 px-2 py-2 text-xs font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            تعديل
-                          </button>
-                          {remaining > 0 ? (
+                          {canEditSubs && (
+                            <button
+                              type="button"
+                              onClick={() => openEditSubscription(sub)}
+                              disabled={isCancelled}
+                              className="rounded-2xl bg-violet-600 px-2 py-2 text-xs font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              تعديل
+                            </button>
+                          )}
+                          {canEditSubs && remaining > 0 ? (
                             <button
                               type="button"
                               onClick={() => collectRemainingPayment(sub)}
@@ -1114,7 +1121,7 @@ export default function Subscriptions() {
                           ) : (
                             <div />
                           )}
-                          {(!isActive || isExpiringSoon) && !isCancelled ? (
+                          {canEditSubs && (!isActive || isExpiringSoon) && !isCancelled ? (
                             <button
                               type="button"
                               onClick={() => openRenewModal(sub)}
@@ -1125,7 +1132,7 @@ export default function Subscriptions() {
                           ) : (
                             <div />
                           )}
-                          {!isCancelled ? (
+                          {canEditSubs && !isCancelled ? (
                             <button
                               type="button"
                               onClick={() => refundSubscription(sub)}
@@ -1136,13 +1143,15 @@ export default function Subscriptions() {
                           ) : (
                             <div />
                           )}
-                          <button
-                            type="button"
-                            onClick={() => deleteSubscription(sub.id)}
-                            className="rounded-2xl bg-slate-700 px-2 py-2 text-xs font-semibold text-white transition hover:bg-slate-800"
-                          >
-                            حذف
-                          </button>
+                          {canEditSubs && (
+                            <button
+                              type="button"
+                              onClick={() => deleteSubscription(sub.id)}
+                              className="rounded-2xl bg-slate-700 px-2 py-2 text-xs font-semibold text-white transition hover:bg-slate-800"
+                            >
+                              حذف
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => showInvoice(sub)}

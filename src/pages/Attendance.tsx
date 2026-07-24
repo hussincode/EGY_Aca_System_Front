@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Bell03, CalendarCheck01, QrCode01, SearchSm } from "@untitledui/icons";
 import AppIcon from "@/components/AppIcon";
+import { useAuth } from "@/contexts/AuthContext";
 
 type AttendanceRecord = {
   id: string;
@@ -58,6 +59,8 @@ const statusStyles = {
 };
 
 const Attendance = () => {
+  const { canEdit } = useAuth();
+  const canEditAttendance = canEdit('attendance');
   const [records, setRecords] = useState<AttendanceRecord[]>(() =>
     readStoredData<AttendanceRecord[]>(ATTENDANCE_KEY, [])
   );
@@ -283,13 +286,15 @@ const response = await api.createAttendance({
                     />
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={handleAddAttendance}
-                    className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-700 sm:w-auto sm:rounded-2xl"
-                  >
-                    + تسجيل حضور
-                  </button>
+                  {canEditAttendance && (
+                    <button
+                      type="button"
+                      onClick={handleAddAttendance}
+                      className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-700 sm:w-auto sm:rounded-2xl"
+                    >
+                      + تسجيل حضور
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -325,13 +330,15 @@ const response = await api.createAttendance({
                       </td>
                       <td className="hidden sm:table-cell px-3 py-3 text-right text-slate-600 sm:px-6">{record.notes || "-"}</td>
                       <td className="whitespace-nowrap px-3 py-3 text-center sm:px-6">
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteAttendance(record.id)}
-                          className="rounded-xl bg-rose-100 px-2.5 py-1.5 text-[10px] font-semibold text-rose-700 transition hover:bg-rose-200 sm:text-xs"
-                        >
-                          حذف
-                        </button>
+                        {canEditAttendance && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteAttendance(record.id)}
+                            className="rounded-xl bg-rose-100 px-2.5 py-1.5 text-[10px] font-semibold text-rose-700 transition hover:bg-rose-200 sm:text-xs"
+                          >
+                            حذف
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}

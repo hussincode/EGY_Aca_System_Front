@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ChangeEvent, type Dispatch, type FormEvent, type SetStateAction } from 'react';
 import { jsPDF } from 'jspdf';
+import { useAuth } from '@/contexts/AuthContext';
 
 type FinanceType = 'income' | 'expense';
 
@@ -102,6 +103,8 @@ function normalizeFinanceFromApi(row: Record<string, unknown>): FinanceEntry | n
 }
 
 export default function FinancePage() {
+  const { canEdit } = useAuth();
+  const canEditFinance = canEdit('finance');
   const [finances, setFinances] = useState<FinanceEntry[]>(() => readStoredData('finances', []));
   const [branches, setBranches] = useState<Branch[]>(() => readStoredData('branches', []));
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -449,9 +452,11 @@ export default function FinancePage() {
           <button type="button" onClick={syncToDashboard} className="rounded-2xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100">
             ↻ مزامنة مع الداشبورد
           </button>
-          <button type="button" onClick={() => openModal()} className="rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-700">
-            + إضافة حركة
-          </button>
+          {canEditFinance && (
+            <button type="button" onClick={() => openModal()} className="rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-700">
+              + إضافة حركة
+            </button>
+          )}
           <button type="button" onClick={exportToCsv} className="rounded-2xl bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-700">
             ⬇ Excel
           </button>
@@ -578,12 +583,16 @@ export default function FinancePage() {
                     <td className="px-4 py-3">{entry.description || '-'}</td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-2">
-                        <button type="button" onClick={() => openModal(entry)} className="rounded-xl border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100">
-                          تعديل
-                        </button>
-                        <button type="button" onClick={() => handleDelete(entry.id)} className="rounded-xl border border-rose-300 px-3 py-1.5 text-sm text-rose-600 hover:bg-rose-50">
-                          حذف
-                        </button>
+                        {canEditFinance && (
+                          <button type="button" onClick={() => openModal(entry)} className="rounded-xl border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100">
+                            تعديل
+                          </button>
+                        )}
+                        {canEditFinance && (
+                          <button type="button" onClick={() => handleDelete(entry.id)} className="rounded-xl border border-rose-300 px-3 py-1.5 text-sm text-rose-600 hover:bg-rose-50">
+                            حذف
+                          </button>
+                        )}
                         <button type="button" onClick={() => exportPdf(entry)} className="rounded-xl bg-sky-600 px-3 py-1.5 text-sm text-white hover:bg-sky-700">
                           PDF
                         </button>

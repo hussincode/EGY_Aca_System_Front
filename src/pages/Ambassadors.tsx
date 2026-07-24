@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Gift02, SearchSm } from '@untitledui/icons';
 import AppIcon from '@/components/AppIcon';
 import type { Ambassador, ReferredPlayer } from '../types/ambassador';
+import { useAuth } from '@/contexts/AuthContext';
 
 type AmbassadorStats = {
   totalPoints: number;
@@ -43,6 +44,8 @@ function normalizeAmbassadorFromApi(row: Record<string, unknown> | null | undefi
 }
 
 export default function Ambassadors() {
+  const { canEdit } = useAuth();
+  const canEditAmbassadors = canEdit('ambassadors');
   const [ambassadors, setAmbassadors] = useState<Ambassador[]>(() =>
     readStoredData<Ambassador[]>('ambassadors', [])
   );
@@ -366,13 +369,15 @@ export default function Ambassadors() {
                 </p>
               </div>
               <div className="flex flex-wrap gap-3">
-                <button
-                  type="button"
-                  onClick={() => openModal(null)}
-                  className="rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary-hover"
-                >
-                  + إضافة سفير
-                </button>
+                {canEditAmbassadors && (
+                  <button
+                    type="button"
+                    onClick={() => openModal(null)}
+                    className="rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary-hover"
+                  >
+                    + إضافة سفير
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={addSampleData}
@@ -498,20 +503,24 @@ export default function Ambassadors() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={() => openModal(index)}
-                            className="rounded-lg bg-purple px-3 py-1.5 text-sm font-semibold text-white transition-colors hover:bg-violet-600"
-                          >
-                            تعديل
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => deleteAmbassador(index)}
-                            className="rounded-lg bg-danger px-3 py-1.5 text-sm font-semibold text-white transition-colors hover:bg-rose-600"
-                          >
-                            حذف
-                          </button>
+                          {canEditAmbassadors && (
+                            <button
+                              type="button"
+                              onClick={() => openModal(index)}
+                              className="rounded-lg bg-purple px-3 py-1.5 text-sm font-semibold text-white transition-colors hover:bg-violet-600"
+                            >
+                              تعديل
+                            </button>
+                          )}
+                          {canEditAmbassadors && (
+                            <button
+                              type="button"
+                              onClick={() => deleteAmbassador(index)}
+                              className="rounded-lg bg-danger px-3 py-1.5 text-sm font-semibold text-white transition-colors hover:bg-rose-600"
+                            >
+                              حذف
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

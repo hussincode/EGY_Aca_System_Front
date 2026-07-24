@@ -705,6 +705,71 @@ export default function Settings() {
 
       {activeTab === 'landing' ? (
         <div className={tabContentClass}>
+          {/* Live Preview Header Card */}
+          <div className="overflow-hidden rounded-3xl bg-slate-900 text-white shadow-xl ring-1 ring-slate-800">
+            <div className="flex flex-col gap-4 border-b border-slate-800 p-6 md:flex-row md:items-center md:justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span className="text-xs font-semibold uppercase tracking-wider text-emerald-400">معاينة حية ومباشرة (Live Preview)</span>
+                </div>
+                <h2 className="mt-1 text-2xl font-bold text-white">معاينة واجهة اللاندنج بيدج</h2>
+                <p className="mt-1 text-xs text-slate-400">أي تعديل في المدخلات بالأسفل ينعكس فوراً في هذه المعاينة.</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <a
+                  href="http://localhost:5173"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 rounded-2xl bg-sky-600 px-5 py-3 text-sm font-semibold text-white shadow-lg transition hover:bg-sky-500"
+                >
+                  <span>فتح اللاندنج بيدج الكاملة</span>
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                  </svg>
+                </a>
+              </div>
+            </div>
+
+            {/* Simulated Hero Section */}
+            <div className="relative min-h-[260px] w-full overflow-hidden bg-slate-950 p-8 flex flex-col justify-end">
+              {heroSettings.bgType === 'video' && heroSettings.videoUrl ? (
+                <video
+                  key={heroSettings.videoUrl}
+                  autoPlay
+                  muted
+                  loop
+                  playsInline
+                  className="absolute inset-0 h-full w-full object-cover opacity-50"
+                >
+                  <source src={heroSettings.videoUrl} type="video/mp4" />
+                </video>
+              ) : (heroImagePreview || heroSettings.imageUrl) ? (
+                <img
+                  src={heroImagePreview || heroSettings.imageUrl}
+                  alt="Hero Background Preview"
+                  className="absolute inset-0 h-full w-full object-cover opacity-50"
+                />
+              ) : (
+                <div className="absolute inset-0 bg-gradient-to-r from-slate-900 via-sky-950 to-slate-900 opacity-90" />
+              )}
+              <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/40 to-transparent" />
+              
+              <div className="relative z-10 space-y-3">
+                <span className="inline-flex items-center gap-2 rounded-full border border-sky-500/30 bg-sky-500/10 px-3 py-1 text-xs font-semibold text-sky-300">
+                  <span className="h-1.5 w-1.5 rounded-full bg-sky-400 animate-pulse" />
+                  Multi-Sport Academy
+                </span>
+                <h1 className="text-3xl font-extrabold tracking-tight text-white md:text-4xl">
+                  {heroSettings.title || 'Train like you mean it.'}
+                </h1>
+                <p className="max-w-xl text-sm text-slate-300">
+                  {heroSettings.subtitle || 'Apex is where the next generation of athletes is built — from first steps to podium finishes.'}
+                </p>
+              </div>
+            </div>
+          </div>
+
           <div className="grid gap-6 lg:grid-cols-2">
             <div className="rounded-3xl bg-white p-6 shadow-sm shadow-slate-200 ring-1 ring-slate-200/70">
               <div className="mb-6 border-b border-slate-200 pb-4">

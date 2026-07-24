@@ -143,18 +143,29 @@ function createId(prefix = 'user') {
 
 function normalizeUserFromApi(row: Record<string, unknown> | null | undefined): UserRecord | null {
   if (!row) return null;
+  const role = normalizeRole(String(row.role || ''));
+  const defaults = roleDefaults[role] || roleDefaults.manager;
+
+  const access = Array.isArray(row.access) && row.access.length > 0
+    ? (row.access as string[])
+    : defaults.access;
+
+  const permissions = Array.isArray(row.permissions) && row.permissions.length > 0
+    ? (row.permissions as string[])
+    : defaults.permissions;
+
   return {
     id: String(row.id || row._id || ''),
     name: String(row.name || ''),
     phone: String(row.phone || ''),
     photo: String(row.photo || ''),
     email: String(row.email || ''),
-    role: normalizeRole(String(row.role || '')),
+    role,
     branch: String(row.branchId || row.branch_id || row.branch || ''), // branch UUID from API
     branchName: String(row.branchName || row.branch || ''),
     active: row.active !== false,
-    access: Array.isArray(row.access) ? row.access as string[] : [],
-    permissions: Array.isArray(row.permissions) ? row.permissions as string[] : [],
+    access,
+    permissions,
     lastLogin: String(row.lastLogin || ''),
   };
 }
@@ -183,7 +194,25 @@ export default function UsersPage() {
         const response = await api.getUsers() as { data?: unknown[] };
         const serverData = Array.isArray(response?.data) ? response.data as Record<string, unknown>[] : [];
         if (serverData.length > 0) {
-          const mapped = serverData.map((item) => normalizeUserFromApi(item)).filter(Boolean) as UserRecord[];
+          const localUsers = readJson<UserRecord[]>('users', []);
+          const localMap = new Map(localUsers.map((u) => [u.id, u]));
+
+          const mapped = serverData.map((item) => {
+            const norm = normalizeUserFromApi(item);
+            if (!norm) return null;
+            const local = localMap.get(norm.id);
+            if (local) {
+              return {
+                ...norm,
+                access: (local.access && local.access.length > 0) ? local.access : norm.access,
+                permissions: (local.permissions && local.permissions.length > 0) ? local.permissions : norm.permissions,
+                phone: norm.phone || local.phone || '',
+                photo: norm.photo || local.photo || '',
+              };
+            }
+            return norm;
+          }).filter(Boolean) as UserRecord[];
+
           if (mapped.length > 0) {
             setUsers(mapped);
             writeJson('users', mapped);

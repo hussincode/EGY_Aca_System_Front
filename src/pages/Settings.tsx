@@ -96,9 +96,35 @@ function readJson<T>(key: string, fallback: T): T {
   }
 }
 
+function broadcastLandingChange(key: string, value: unknown) {
+  try {
+    const bc = new BroadcastChannel('landing_settings_sync');
+    bc.postMessage({ [key]: value });
+    bc.close();
+  } catch {}
+  try {
+    fetch('http://localhost:5000/api/landing-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [key]: value }),
+    }).catch(() => {});
+  } catch {}
+}
+
 function writeJson<T>(key: string, value: T) {
   if (typeof window === 'undefined') return;
   window.localStorage.setItem(key, JSON.stringify(value));
+  broadcastLandingChange(key, value);
+}
+
+function writeString(key: string, value: string) {
+  if (typeof window === 'undefined') return;
+  if (!value) {
+    window.localStorage.removeItem(key);
+  } else {
+    window.localStorage.setItem(key, value);
+  }
+  broadcastLandingChange(key, value);
 }
 
 function readString(key: string) {
@@ -153,6 +179,14 @@ export default function Settings() {
   const [editingNewsIndex, setEditingNewsIndex] = useState<number>(-1);
   const [sportName, setSportName] = useState('');
   const [branchNameSetting, setBranchNameSetting] = useState('');
+
+  useEffect(() => {
+    writeJson('landing_hero_settings', heroSettings);
+  }, [heroSettings]);
+
+  useEffect(() => {
+    writeJson('system_settings_general', general);
+  }, [general]);
 
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [auditSearch, setAuditSearch] = useState('');
@@ -300,7 +334,7 @@ export default function Settings() {
     reader.onload = (loadEvent) => {
       const result = loadEvent.target?.result;
       if (typeof result === 'string') {
-        window.localStorage.setItem('landing_hero_image', result);
+        writeString('landing_hero_image', result);
         setHeroSettings((prev) => ({ ...prev, imageUrl: '' }));
         setHeroImagePreview(result);
         showToast('تم تحديث صورة الخلفية بنجاح', 'success');
@@ -311,7 +345,7 @@ export default function Settings() {
 
   const resetHeroImage = () => {
     if (window.confirm('هل تريد حذف الصورة المخصصة والعودة للصورة الافتراضية؟')) {
-      window.localStorage.removeItem('landing_hero_image');
+      writeString('landing_hero_image', '');
       setHeroSettings((prev) => ({ ...prev, imageUrl: '' }));
       setHeroImagePreview('');
       showToast('تم حذف الصورة المخصصة', 'success');
@@ -330,7 +364,7 @@ export default function Settings() {
     reader.onload = (loadEvent) => {
       const result = loadEvent.target?.result;
       if (typeof result === 'string') {
-        window.localStorage.setItem('landing_ceo_photo', result);
+        writeString('landing_ceo_photo', result);
         setCeoPhotoUrl(result);
         setCeoPhotoPreview(result);
       }
@@ -445,16 +479,27 @@ export default function Settings() {
   const uploadLandingMedia = (event: ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (!files?.length) return;
-    const next: LandingMediaItem[] = [];
-    Array.from(files).forEach((file) => {
+    // Convert to Array before clearing input so files are retained
+    const fileArray = Array.from(files);
+    const fileCount = fileArray.length;
+    event.target.value = '';
+
+    const newItems: LandingMediaItem[] = [];
+    let loaded = 0;
+    fileArray.forEach((file) => {
       const reader = new FileReader();
       reader.onload = (loadEvent) => {
         const result = loadEvent.target?.result;
         if (typeof result === 'string') {
-          next.unshift({ type: file.type, data: result });
-          const prepared = next.slice(0, 20);
-          setMediaItems(prepared);
-          writeJson('landing_media', prepared);
+          newItems.push({ type: file.type, data: result });
+        }
+        loaded++;
+        if (loaded === fileCount) {
+          setMediaItems((prev) => {
+            const combined = [...newItems, ...prev].slice(0, 40);
+            writeJson('landing_media', combined);
+            return combined;
+          });
         }
       };
       reader.readAsDataURL(file);

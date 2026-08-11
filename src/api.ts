@@ -4,7 +4,7 @@ type ApiResponse<T = unknown> = {
   success?: boolean;
 };
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://egyacaback.vercel.app';
 
 function getStoredToken() {
   if (typeof window === 'undefined') return null;
@@ -34,7 +34,6 @@ async function request<T = unknown>(url: string, options: RequestInit = {}) {
   }
 
   const response = await fetch(resolveApiUrl(url), {
-    credentials: 'include',
     ...options,
     headers,
   });

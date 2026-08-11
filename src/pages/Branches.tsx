@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Folder, SearchSm } from '@untitledui/icons';
+import { Folder, LinkExternal01, MarkerPin01, SearchSm } from '@untitledui/icons';
 import AppIcon from '@/components/AppIcon';
 import { useAuth } from '@/contexts/AuthContext';
 import { API_BASE_URL } from '@/api';
@@ -66,6 +66,23 @@ function resolveBranchData(raw: Record<string, unknown> | null | undefined): Bra
     manager: String(raw?.manager || raw?.branchManager || ''),
     location: String(raw?.location || raw?.address || ''),
   };
+}
+
+function isUrl(str?: string) {
+  if (!str) return false;
+  const trimmed = str.trim();
+  return (
+    /^https?:\/\//i.test(trimmed) ||
+    /^www\./i.test(trimmed) ||
+    /maps\.google/i.test(trimmed) ||
+    /goo\.gl/i.test(trimmed) ||
+    /maps\.app/i.test(trimmed)
+  );
+}
+function getFormattedUrl(url: string) {
+  const trimmed = url.trim();
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return `https://${trimmed}`;
 }
 
 function getApiToken() {
@@ -265,8 +282,14 @@ export default function Branches() {
         return;
       } catch (error) {
         if (isApiConnectivityError(error)) {
+          setBranches((current) => {
+            const next = current.filter((item) => item.id !== branchId);
+            window.localStorage.setItem(BRANCHES_KEY, JSON.stringify(next));
+            return next;
+          });
           showToast('تعذر الوصول للباك إند، تم الحذف محلياً', 'warning');
-          switchToLocalMode();
+          setBranchToDelete(null);
+          return;
         } else {
           showToast((error as { message?: string } | undefined)?.message || 'فشل حذف الفرع', 'error');
           return;
@@ -324,8 +347,16 @@ export default function Branches() {
         return;
       } catch (error) {
         if (isApiConnectivityError(error)) {
+          setBranches((current) => {
+            const next = editingBranchId
+              ? current.map((item) => (item.id === editingBranchId ? payload : item))
+              : [...current, payload];
+            window.localStorage.setItem(BRANCHES_KEY, JSON.stringify(next));
+            return next;
+          });
           showToast('تعذر الوصول للباك إند، تم الحفظ محلياً', 'warning');
-          switchToLocalMode();
+          closeBranchModal();
+          return;
         } else {
           showToast((error as { message?: string } | undefined)?.message || 'فشل حفظ الفرع', 'error');
           return;
@@ -441,8 +472,26 @@ export default function Branches() {
                   <tr key={branch.id} className="rounded-3xl border border-slate-200 bg-slate-50">
                     <td className="px-4 py-4 text-right font-semibold text-slate-900">{branch.name}</td>
                     <td className="px-4 py-4 text-right text-slate-600">{branch.manager || '-'}</td>
-                    <td className="px-4 py-4 text-right text-slate-600">{branch.location || '-'}</td>
-                    <td className="px-4 py-4 text-center">
+                    <td className="px-4 py-4 text-right text-slate-600">
+                      {branch.location ? (
+                        isUrl(branch.location) ? (
+                          <a
+                            href={getFormattedUrl(branch.location)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 font-medium text-sky-600 transition hover:text-sky-700 hover:underline"
+                          >
+                            <AppIcon icon={MarkerPin01} className="h-4 w-4 shrink-0 text-sky-600" />
+                            <span>عرض الموقع</span>
+                            <AppIcon icon={LinkExternal01} className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                          </a>
+                        ) : (
+                          branch.location
+                        )
+                      ) : (
+                        '-'
+                      )}
+                    </td>                    <td className="px-4 py-4 text-center">
                       <div className="flex flex-wrap justify-center gap-2">
                         {canEditBranches && (
                           <button
@@ -485,6 +534,7 @@ export default function Branches() {
                   اسم الفرع
                   <input
                     value={formState.name}
+                    placeholder='مدينة نصر'
                     onChange={(event) => setFormState((prev) => ({ ...prev, name: event.target.value }))}
                     className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
                   />
@@ -493,18 +543,25 @@ export default function Branches() {
                   مدير الفرع
                   <input
                     value={formState.manager}
+                    placeholder='محمد احمد'
                     onChange={(event) => setFormState((prev) => ({ ...prev, manager: event.target.value }))}
                     className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
                   />
                 </label>
               </div>
-              <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                الموقع
+              <label className="block space-y-2 text-right text-sm font-medium text-slate-700">
+                <span>رابط الموقع (خرائط جوجل / Google Maps)</span>
                 <input
+                  type="url"
                   value={formState.location}
+                  placeholder="https://maps.google.com/..."
+                  dir="ltr"
                   onChange={(event) => setFormState((prev) => ({ ...prev, location: event.target.value }))}
-                  className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
+                  className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-left text-sm text-slate-900 outline-none transition focus:border-sky-500 focus:bg-white placeholder:text-right placeholder:text-slate-400"
                 />
+                <span className="block text-xs font-normal text-slate-500">
+                  قم بوضع رابط موقع الفرع على خرائط جوجل لسهولة الانتقال إليه مباشرة.
+                </span>
               </label>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4">

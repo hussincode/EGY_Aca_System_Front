@@ -268,8 +268,8 @@ export default function Staff() {
       const amount = member.payType === 'hour'
         ? member.rate * member.hours
         : member.payType === 'percent'
-        ? (member.rate / 100) * member.revenue
-        : member.rate;
+          ? (member.rate / 100) * member.revenue
+          : member.rate;
 
       return {
         type: 'expense',
@@ -367,6 +367,7 @@ export default function Staff() {
                   الاسم الكامل
                   <input
                     value={formState.name}
+                    placeholder='احمد حسين'
                     onChange={(event) => setFormState((prev) => ({ ...prev, name: event.target.value }))}
                     className="mt-2 w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
                     required
@@ -376,15 +377,33 @@ export default function Staff() {
                   رقم الهاتف
                   <input
                     value={formState.phone}
-                    onChange={(event) => setFormState((prev) => ({ ...prev, phone: event.target.value }))}
-                    className="mt-2 w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
+                    placeholder="01234567890"
+                    inputMode="numeric"
                     type="tel"
+                    maxLength={11}
+                    minLength={11}
+                    pattern="[0-9]{11}"
+                    required
+                    onChange={(event) => {
+                      const digits = event.target.value.replace(/\D/g, '').slice(0, 11);
+                      setFormState((prev) => ({ ...prev, phone: digits }));
+                    }}
+                    className={`mt-2 w-full rounded-3xl border px-4 py-3 text-right text-sm text-slate-900 outline-none ${formState.phone.length > 0 && formState.phone.length !== 11
+                        ? 'border-red-400 bg-red-50'
+                        : 'border-slate-200 bg-slate-50'
+                      }`}
                   />
+                  {formState.phone.length > 0 && formState.phone.length !== 11 && (
+                    <p className="mt-1 text-xs text-red-500 text-right">
+                      يجب أن يكون رقم الهاتف 11 رقماً بالضبط — أدخلت {formState.phone.length}/11
+                    </p>
+                  )}
                 </label>
                 <label className="block text-right text-sm font-medium text-slate-700">
                   الوظيفة
                   <input
                     value={formState.role}
+                    placeholder='مدرب'
                     onChange={(event) => setFormState((prev) => ({ ...prev, role: event.target.value }))}
                     className="mt-2 w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
                     required
@@ -406,18 +425,19 @@ export default function Staff() {
                   <label className="block text-right text-sm font-medium text-slate-700">
                     القيمة
                     <input
-                      value={formState.rate}
-                      onChange={(event) => setFormState((prev) => ({ ...prev, rate: Number(event.target.value) }))}
+                      value={formState.rate === 0 ? '' : formState.rate}
+                      onChange={(event) => setFormState((prev) => ({ ...prev, rate: Math.max(0, Number(event.target.value)) }))}
                       className="mt-2 w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
                       type="number"
+                      min={0}
                     />
                   </label>
                   <label className="block text-right text-sm font-medium text-slate-700">
                     الساعات / الإيراد
                     <input
-                      value={formState.payType === 'percent' ? formState.revenue : formState.hours}
+                      value={(() => { const v = formState.payType === 'percent' ? formState.revenue : formState.hours; return v === 0 ? '' : v; })()}
                       onChange={(event) => {
-                        const value = Number(event.target.value);
+                        const value = Math.max(0, Number(event.target.value));
                         setFormState((prev) => ({
                           ...prev,
                           hours: prev.payType === 'hour' ? value : prev.hours,
@@ -426,6 +446,7 @@ export default function Staff() {
                       }}
                       className="mt-2 w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
                       type="number"
+                      min={0}
                       placeholder={formState.payType === 'percent' ? 'إيراد الشهر' : 'عدد الساعات'}
                     />
                   </label>
@@ -502,7 +523,7 @@ export default function Staff() {
         </div>
       </div>
 
-     
+
 
       <div className="space-y-6">
         <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm shadow-slate-200/50">
@@ -593,7 +614,7 @@ export default function Staff() {
 
         <div className="rounded-3xl bg-white p-6 shadow-sm shadow-slate-200 ring-1 ring-slate-200/70">
           <div className="grid gap-6">
-            
+
 
             <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
               <h3 className="text-base font-semibold text-slate-900">إحصائيات أساسية</h3>

@@ -319,6 +319,7 @@ export default function Games() {
                 اسم اللعبة
                 <input
                   value={formState.name}
+                  placeholder='سباحه'
                   onChange={(event) => setFormState((prev) => ({ ...prev, name: event.target.value }))}
                   className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-right"
                 />
@@ -327,6 +328,7 @@ export default function Games() {
                 الوصف
                 <textarea
                   value={formState.description}
+                  placeholder='وصف اللعبة'
                   onChange={(event) => setFormState((prev) => ({ ...prev, description: event.target.value }))}
                   className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-right min-h-[80px]"
                 />
@@ -349,9 +351,8 @@ export default function Games() {
                       key={value}
                       type="button"
                       onClick={() => setFormState((prev) => ({ ...prev, icon: value }))}
-                      className={`flex h-11 items-center justify-center rounded-xl border text-lg transition ${
-                        formState.icon === value ? 'border-sky-600 bg-sky-600 text-white' : 'border-slate-200 bg-white text-slate-500 hover:border-sky-400 hover:text-sky-600'
-                      }`}
+                      className={`flex h-11 items-center justify-center rounded-xl border text-lg transition ${formState.icon === value ? 'border-sky-600 bg-sky-600 text-white' : 'border-slate-200 bg-white text-slate-500 hover:border-sky-400 hover:text-sky-600'
+                        }`}
                     >
                       <span className="text-2xl leading-none" role="img" aria-label={label}>
                         {glyph}

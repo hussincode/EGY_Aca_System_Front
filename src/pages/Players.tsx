@@ -453,7 +453,12 @@ export default function Players() {
           const response = await window.api.updatePlayer(currentPlayerId, payloadToSend);
           const serverPlayer = normalizePlayerFromApi((response as { data?: Record<string, unknown> } | undefined)?.data as Record<string, unknown> | null | undefined);
           if (serverPlayer) {
-            savedPlayer = serverPlayer;
+            // Merge back game/branch names in case the server only returned IDs
+            savedPlayer = {
+              ...serverPlayer,
+              game: serverPlayer.game || formState.game,
+              branch: serverPlayer.branch || formState.branch,
+            };
           }
         }
         setPlayers((prev) => prev.map((player) => (player.id === currentPlayerId ? savedPlayer : player)));
@@ -462,7 +467,12 @@ export default function Players() {
           const response = await window.api.createPlayer(payloadToSend);
           const serverPlayer = normalizePlayerFromApi((response as { data?: Record<string, unknown> } | undefined)?.data as Record<string, unknown> | null | undefined);
           if (serverPlayer) {
-            savedPlayer = serverPlayer;
+            // Merge back game/branch names in case the server only returned IDs
+            savedPlayer = {
+              ...serverPlayer,
+              game: serverPlayer.game || formState.game,
+              branch: serverPlayer.branch || formState.branch,
+            };
           }
         }
         setPlayers((prev) => [...prev, savedPlayer]);
@@ -913,11 +923,27 @@ export default function Players() {
                       رقم الهاتف
                       <input
                         type="tel"
+                        inputMode="numeric"
                         value={formState.phone}
-                        onChange={(event) => setFormState((prev) => ({ ...prev, phone: event.target.value }))}
-                        placeholder="مثلاً: 01012345678"
-                        className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
+                        maxLength={11}
+                        minLength={11}
+                        pattern="[0-9]{11}"
+                        onChange={(event) => {
+                          const digits = event.target.value.replace(/\D/g, '').slice(0, 11);
+                          setFormState((prev) => ({ ...prev, phone: digits }));
+                        }}
+                        placeholder="01012345678"
+                        className={`w-full rounded-3xl border px-4 py-3 text-right text-sm text-slate-900 outline-none ${
+                          formState.phone && formState.phone.length !== 11
+                            ? 'border-red-400 bg-red-50'
+                            : 'border-slate-200 bg-slate-50'
+                        }`}
                       />
+                      {formState.phone && formState.phone.length !== 11 && (
+                        <p className="text-xs text-red-500 text-right">
+                          يجب أن يكون رقم الهاتف 11 رقماً بالضبط — أدخلت {formState.phone.length}/11
+                        </p>
+                      )}
                     </label>
                     <label className="space-y-2 text-right text-sm font-medium text-slate-700">
                       اللعبة
@@ -1055,8 +1081,9 @@ export default function Players() {
                       قيمة الاشتراك (EGP)
                       <input
                         type="number"
-                        value={formState.subscriptionValue}
-                        onChange={(event) => setFormState((prev) => ({ ...prev, subscriptionValue: Number(event.target.value) }))}
+                        min={0}
+                        value={formState.subscriptionValue === 0 ? '' : formState.subscriptionValue}
+                        onChange={(event) => setFormState((prev) => ({ ...prev, subscriptionValue: Math.max(0, Number(event.target.value)) }))}
                         className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
                         placeholder="100"
                       />

@@ -1,10 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { jsPDF } from 'jspdf';
 import QRCode from 'qrcode';
-import { CreditCard01, Plus, SearchSm, Wallet01 } from '@untitledui/icons';
+import {
+  CreditCard01,
+  Plus,
+  SearchSm,
+  Wallet01,
+  Calendar,
+  Clock,
+  MessageChatCircle,
+  File02,
+  Trash01,
+} from '@untitledui/icons';
 import AppIcon from '@/components/AppIcon';
 import { useAuth } from '@/contexts/AuthContext';
 
+/* ── Types ──────────────────────────────────────────────────── */
 type FinanceRecordLike = {
   id?: string;
   source?: string;
@@ -28,7 +39,6 @@ type Player = {
 };
 
 type Game = { id: string; name: string };
-
 type Branch = { id: string; name: string };
 
 type SubscriptionRecord = {
@@ -110,15 +120,12 @@ const emptyRenewState: RenewFormState = {
   invoiceNumber: '',
 };
 
+/* ── Helpers ────────────────────────────────────────────────── */
 function readStorage<T>(key: string, fallback: T): T {
   if (typeof window === 'undefined') return fallback;
   const value = window.localStorage.getItem(key);
   if (!value) return fallback;
-  try {
-    return JSON.parse(value) as T;
-  } catch {
-    return fallback;
-  }
+  try { return JSON.parse(value) as T; } catch { return fallback; }
 }
 
 function formatTimeTo12h(timeStr: string) {
@@ -126,8 +133,7 @@ function formatTimeTo12h(timeStr: string) {
   const [hoursText, minutes] = timeStr.split(':');
   let hours = Number(hoursText);
   const ampm = hours >= 12 ? 'مساءً' : 'صباحاً';
-  hours = hours % 12;
-  hours = hours || 12;
+  hours = hours % 12 || 12;
   return `${hours}:${minutes} ${ampm}`;
 }
 
@@ -174,21 +180,27 @@ export default function Subscriptions() {
   const [subscriptions, setSubscriptions] = useState<SubscriptionRecord[]>(() => readStorage('subscriptions', []));
   const [games, setGames] = useState<Game[]>(() => readStorage('games', []));
   const [, setBranches] = useState<Branch[]>(() => readStorage('branches', []));
+
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [paymentFilter, setPaymentFilter] = useState('all');
   const [branchFilter, setBranchFilter] = useState('all');
   const [gameFilter, setGameFilter] = useState('all');
   const [barcodeInput, setBarcodeInput] = useState('');
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
+
   const [isSubscriptionModalOpen, setIsSubscriptionModalOpen] = useState(false);
   const [isRenewModalOpen, setIsRenewModalOpen] = useState(false);
   const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
+
   const [formState, setFormState] = useState<SubscriptionFormState>(emptyFormState);
   const [renewState, setRenewState] = useState<RenewFormState>(emptyRenewState);
   const [currentInvoice, setCurrentInvoice] = useState<SubscriptionRecord | null>(null);
+
   const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
   const invoiceCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
+  /* ── Load from API ─────────────────────────────────────────── */
   useEffect(() => {
     const loadFromApi = async () => {
       const api = window.api;
@@ -201,13 +213,33 @@ export default function Subscriptions() {
           api.getBranches().catch(() => ({ data: readStorage('branches', []) })),
         ]);
 
+        const rawSubs = Array.isArray(subsResponse?.data) ? subsResponse.data : [];
+        const normalizedSubs: SubscriptionRecord[] = rawSubs.map((item: any) => ({
+          id: String(item.id || ''),
+          playerId: String(item.playerId || item.player_id || ''),
+          player: String(item.player || item.player_name || ''),
+          playerCode: String(item.playerCode || item.player_code || item.playerSerial || ''),
+          game: String(item.game || item.game_name || ''),
+          branch: String(item.branch || item.branch_name || ''),
+          branchId: String(item.branchId || item.branch_id || ''),
+          schedule: String(item.schedule || ''),
+          trainingTime: String(item.trainingTime || item.training_time || ''),
+          sessions: Number(item.sessions || 0),
+          subscriptionValue: Number(item.subscriptionValue ?? item.subscription_value ?? 0),
+          paidAmount: Number(item.paidAmount ?? item.paid_amount ?? 0),
+          startDate: String(item.startDate || item.start_date || ''),
+          endDate: String(item.endDate || item.end_date || ''),
+          status: item.status === 'cancelled' ? 'cancelled' : item.status === 'expired' ? 'expired' : 'active',
+          invoiceNumber: String(item.invoiceNumber || item.invoice_number || ''),
+        }));
+
         setPlayers((playersResponse.data as Player[]) || []);
-        setSubscriptions((subsResponse.data as SubscriptionRecord[]) || []);
+        setSubscriptions(normalizedSubs);
         setGames((gamesResponse.data as Game[]) || []);
         setBranches((branchesResponse.data as Branch[]) || []);
 
         window.localStorage.setItem('players', JSON.stringify(playersResponse.data || []));
-        window.localStorage.setItem('subscriptions', JSON.stringify(subsResponse.data || []));
+        window.localStorage.setItem('subscriptions', JSON.stringify(normalizedSubs));
         window.localStorage.setItem('games', JSON.stringify(gamesResponse.data || []));
         window.localStorage.setItem('branches', JSON.stringify(branchesResponse.data || []));
       } catch {
@@ -240,6 +272,7 @@ export default function Subscriptions() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
+  /* ── Render Invoice Canvas ─────────────────────────────────── */
   useEffect(() => {
     if (!currentInvoice || !invoiceCanvasRef.current) return;
     const canvas = invoiceCanvasRef.current;
@@ -290,14 +323,8 @@ export default function Subscriptions() {
       drawField('رقم الإيصال', currentInvoice.invoiceNumber || '-');
       drawField('اسم اللاعب', currentInvoice.player);
       drawField('الرياضة / النشاط', currentInvoice.game);
-      drawField(
-        'أيام التدريب',
-        currentInvoice.schedule || '-',
-      );
-      drawField(
-        'توقيت التدريب',
-        currentInvoice.trainingTime || '-',
-      );
+      drawField('أيام التدريب', currentInvoice.schedule || '-');
+      drawField('توقيت التدريب', currentInvoice.trainingTime || '-');
       drawField('عدد الحصص', String(currentInvoice.sessions));
       drawField('قيمة الاشتراك', `${currentInvoice.subscriptionValue} ج.م`);
       drawField('المبلغ المدفوع', `${currentInvoice.paidAmount} ج.م`, '#16a34a');
@@ -318,7 +345,6 @@ export default function Subscriptions() {
           margin: 1,
           color: { dark: '#0f172a', light: '#ffffff' },
         });
-
         const image = new Image();
         image.src = qrDataUrl;
         image.onload = () => {
@@ -326,9 +352,7 @@ export default function Subscriptions() {
           ctx.fillRect(40, height - 320, 180, 180);
           ctx.drawImage(image, 45, height - 315, 170, 170);
         };
-      } catch {
-        // QR code generation failed; do nothing.
-      }
+      } catch { /* QR optional */ }
     };
 
     renderInvoice();
@@ -338,6 +362,7 @@ export default function Subscriptions() {
     window.localStorage.setItem(key, JSON.stringify(value));
   };
 
+  /* ── Calculations & Metrics ────────────────────────────────── */
   const subscriptionMetrics = useMemo(() => {
     const today = new Date();
     const items = subscriptions;
@@ -357,11 +382,11 @@ export default function Subscriptions() {
   }, [subscriptions]);
 
   const uniqueBranchOptions = useMemo(() => {
-    return Array.from(new Set(subscriptions.map((sub) => sub.branch || '').filter((branch) => branch))).sort();
+    return Array.from(new Set(subscriptions.map((sub) => sub.branch || '').filter(Boolean))).sort();
   }, [subscriptions]);
 
   const uniqueGameOptions = useMemo(() => {
-    return Array.from(new Set(subscriptions.map((sub) => sub.game || '').filter((game) => game))).sort();
+    return Array.from(new Set(subscriptions.map((sub) => sub.game || '').filter(Boolean))).sort();
   }, [subscriptions]);
 
   const filteredSubscriptions = useMemo(() => {
@@ -395,6 +420,7 @@ export default function Subscriptions() {
     });
   }, [branchFilter, gameFilter, paymentFilter, searchText, statusFilter, subscriptions]);
 
+  /* ── Modal & Handler Actions ────────────────────────────────── */
   const openAddSubscription = () => {
     setFormState({ ...emptyFormState, startDate: '', endDate: '' });
     setIsSubscriptionModalOpen(true);
@@ -465,8 +491,8 @@ export default function Subscriptions() {
 
     let subscription: SubscriptionRecord = {
       id: formState.id || createStableId('sub'),
-      playerId: selectedPlayer?.id || '',
-      player: selectedPlayer?.name || '',
+      playerId: selectedPlayer?.id || formState.playerId || existingSubscription?.playerId || '',
+      player: selectedPlayer?.name || existingSubscription?.player || '',
       playerCode:
         selectedPlayer?.playerSerial ||
         selectedPlayer?.playerBarcodeValue ||
@@ -508,11 +534,7 @@ export default function Subscriptions() {
       if (selectedPlayer) {
         const nextPlayers = players.map((player) =>
           player.id === selectedPlayer.id
-            ? {
-                ...player,
-                schedule: subscription.schedule,
-                trainingTime: subscription.trainingTime,
-              }
+            ? { ...player, schedule: subscription.schedule, trainingTime: subscription.trainingTime }
             : player,
         );
         setPlayers(nextPlayers);
@@ -532,10 +554,7 @@ export default function Subscriptions() {
   const deleteSubscription = async (id: string) => {
     if (!window.confirm('هل تريد حذف هذا الاشتراك؟')) return;
     const subscriptionToDelete = subscriptions.find((sub) => sub.id === id);
-    if (!subscriptionToDelete) {
-      showToast('الاشتراك غير موجود', 'error');
-      return;
-    }
+    if (!subscriptionToDelete) return;
 
     try {
       const api = window.api;
@@ -558,6 +577,7 @@ export default function Subscriptions() {
     description: string,
     date: string,
   ) => {
+    if (amount <= 0) return;
     const financeRecord = {
       type: 'income',
       category: 'اشتراكات',
@@ -572,12 +592,10 @@ export default function Subscriptions() {
       sourceKey: `subscription:${subscription.id}:${Date.now()}`,
     };
 
-    if (amount <= 0) return;
     if (window.api?.createFinance) {
       await window.api.createFinance(financeRecord);
       return;
     }
-
     if (window.sharedFinance?.addFinance) {
       window.sharedFinance.addFinance(
         'income',
@@ -603,9 +621,7 @@ export default function Subscriptions() {
       const items = Array.isArray(financeResponse?.data) ? (financeResponse.data as FinanceRecordLike[]) : [];
       const linked = items.filter((record) => String(record.source || '') === 'subscription' && String(record.sourceId || '') === sourceId);
       for (const record of linked) {
-        if (record.id) {
-          await window.api.deleteFinance(record.id);
-        }
+        if (record.id) await window.api.deleteFinance(record.id);
       }
       return;
     }
@@ -637,7 +653,7 @@ export default function Subscriptions() {
       return;
     }
 
-    const matches = subscriptions.filter((subscription) => subscription.playerId === player.id || subscription.player === player.name);
+    const matches = subscriptions.filter((s) => s.playerId === player.id || s.player === player.name);
     if (matches.length) {
       setSearchText(player.name);
       showToast(`تم العثور على ${matches.length} اشتراك للاعب ${player.name}`, 'success');
@@ -663,7 +679,7 @@ export default function Subscriptions() {
       startDate: today,
       endDate: nextMonth.toISOString().slice(0, 10),
       sessions: subscription.sessions || 0,
-      price: subscription.subscriptionValue || subscription.subscriptionValue,
+      price: subscription.subscriptionValue || 0,
       paidAmount: 0,
       invoiceNumber: '',
     });
@@ -871,43 +887,42 @@ export default function Subscriptions() {
     return 'منتهي';
   };
 
-  const statusClasses = (status: SubscriptionRecord['status']) => {
-    if (status === 'cancelled') return 'bg-slate-100 text-slate-600 line-through';
-    if (status === 'active') return 'bg-emerald-100 text-emerald-700';
-    return 'bg-rose-100 text-rose-700';
+  const statusBadgeStyle = (status: SubscriptionRecord['status']) => {
+    if (status === 'cancelled') return 'bg-slate-100 text-slate-600 border-slate-200';
+    if (status === 'active') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    return 'bg-rose-50 text-rose-700 border-rose-200';
   };
 
   return (
-    <div className="space-y-6">
+    <div dir="rtl" className="space-y-5 font-sans">
+      {/* Toast */}
       {toast ? (
-        <div className={`fixed right-6 top-6 z-50 rounded-3xl px-4 py-3 text-sm font-semibold shadow-xl ${
-          toast.type === 'success'
-            ? 'bg-emerald-600 text-white'
-            : toast.type === 'error'
-            ? 'bg-rose-600 text-white'
-            : 'bg-sky-600 text-white'
+        <div className={`fixed right-6 top-6 z-50 rounded-2xl px-4 py-3 text-sm font-semibold shadow-xl transition-all ${
+          toast.type === 'success' ? 'bg-emerald-600 text-white' : toast.type === 'error' ? 'bg-rose-600 text-white' : 'bg-sky-600 text-white'
         }`}>
           {toast.message}
         </div>
       ) : null}
 
-      <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-          <div>
-            <div className="flex items-center gap-3 text-slate-500">
-              <AppIcon icon={CreditCard01} />
-              <span className="text-sm font-semibold">إدارة الاشتراكات</span>
+      {/* ── Compact Header Card ── */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <div className="rounded-xl bg-sky-50 p-3 text-sky-600">
+              <AppIcon icon={CreditCard01} className="h-6 w-6" />
             </div>
-            <h1 className="mt-3 text-3xl font-semibold text-slate-900">الاشتراكات</h1>
-            <p className="mt-2 text-sm text-slate-500">متابعة الاشتراكات، الدفعات، والحالة الحالية لكل لاعب من شاشة واحدة.</p>
+            <div>
+              <h1 className="text-xl font-bold text-slate-900">إدارة الاشتراكات</h1>
+              <p className="text-xs text-slate-500">متابعة دقيقة لاشتراكات وتدريبات ومستحقات اللاعبين</p>
+            </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
             {canEditSubs && (
               <button
                 type="button"
                 onClick={openAddSubscription}
-                className="inline-flex items-center gap-2 rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700"
+                className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700"
               >
                 <Plus className="h-4 w-4" />
                 إضافة اشتراك
@@ -915,287 +930,363 @@ export default function Subscriptions() {
             )}
             <button
               type="button"
-              onClick={() => window.alert('Export غير مدعوم في النسخة الحالية')}
-              className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300"
+              onClick={() => setViewMode(viewMode === 'cards' ? 'table' : 'cards')}
+              className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
             >
-              <AppIcon icon={Wallet01} />
-              Excel
+              {viewMode === 'cards' ? 'عرض جدول 📋' : 'عرض كروت 🎴'}
             </button>
           </div>
         </div>
 
-        <div className="mt-8 grid gap-4 lg:grid-cols-5">
-          <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-            <p className="text-sm text-slate-500">إجمالي الاشتراكات</p>
-            <p className="mt-4 text-3xl font-semibold text-slate-900">{subscriptionMetrics.total}</p>
-            <p className="mt-2 text-sm text-slate-500">عدد السجلات الحالية</p>
+        {/* Compact Stat Cards Grid */}
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3 text-right">
+            <span className="text-xs font-medium text-slate-500">إجمالي الاشتراكات</span>
+            <p className="mt-1 text-xl font-bold text-slate-900">{subscriptionMetrics.total}</p>
           </div>
-          <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-            <p className="text-sm text-slate-500">الاشتراكات النشطة</p>
-            <p className="mt-4 text-3xl font-semibold text-slate-900">{subscriptionMetrics.active}</p>
-            <p className="mt-2 text-sm text-slate-500">بحسب تاريخ الانتهاء</p>
+          <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 p-3 text-right">
+            <span className="text-xs font-medium text-emerald-600">نشطة</span>
+            <p className="mt-1 text-xl font-bold text-emerald-700">{subscriptionMetrics.active}</p>
           </div>
-          <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-            <p className="text-sm text-slate-500">المبالغ المحصلة</p>
-            <p className="mt-4 text-3xl font-semibold text-slate-900">{subscriptionMetrics.paid.toLocaleString()} ج</p>
-            <p className="mt-2 text-sm text-slate-500">إجمالي المدفوع من كل الاشتراكات</p>
+          <div className="rounded-xl border border-sky-100 bg-sky-50/50 p-3 text-right">
+            <span className="text-xs font-medium text-sky-600">المحصل</span>
+            <p className="mt-1 text-xl font-bold text-sky-700">{subscriptionMetrics.paid.toLocaleString()} ج</p>
           </div>
-          <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-            <p className="text-sm text-slate-500">إجمالي الديون (المتبقي)</p>
-            <p className="mt-4 text-3xl font-semibold text-rose-600">{subscriptionMetrics.debt.toLocaleString()} ج</p>
-            <p className="mt-2 text-sm text-slate-500">المبالغ المتبقية غير المحصلة</p>
+          <div className="rounded-xl border border-rose-100 bg-rose-50/50 p-3 text-right">
+            <span className="text-xs font-medium text-rose-600">المتبقي (ديون)</span>
+            <p className="mt-1 text-xl font-bold text-rose-600">{subscriptionMetrics.debt.toLocaleString()} ج</p>
           </div>
-          <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-            <p className="text-sm text-slate-500">تنتهي خلال يومين</p>
-            <p className="mt-4 text-3xl font-semibold text-amber-600">{subscriptionMetrics.expiringSoon}</p>
-            <p className="mt-2 text-sm text-slate-500">اشتراكات نشطة أوشكت على الانتهاء</p>
+          <div className="col-span-2 rounded-xl border border-amber-100 bg-amber-50/50 p-3 text-right sm:col-span-1">
+            <span className="text-xs font-medium text-amber-600">تنتهي قريباً (يومان)</span>
+            <p className="mt-1 text-xl font-bold text-amber-700">{subscriptionMetrics.expiringSoon}</p>
           </div>
         </div>
       </div>
 
-      <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
-        <div className="grid gap-3 lg:grid-cols-[1.8fr_1fr] xl:grid-cols-[2fr_1.2fr]">
-          <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-600">
-            <SearchSm className="h-5 w-5" />
+      {/* ── Search & Filter Card ── */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm space-y-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          {/* Search text */}
+          <div className="relative flex items-center lg:col-span-2">
+            <SearchSm className="absolute right-3 h-4 w-4 text-slate-400" />
             <input
               value={searchText}
               onChange={(event) => setSearchText(event.target.value)}
-              placeholder="بحث عن لاعب أو لعبة..."
-              className="w-full bg-transparent text-right text-sm outline-none"
+              placeholder="بحث باسم اللاعب أو اللعبة..."
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pr-9 pl-3 text-right text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
             />
           </div>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <select
-              value={gameFilter}
-              onChange={(event) => setGameFilter(event.target.value)}
-              className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-right"
-            >
-              <option value="all">كل الألعاب</option>
-              {uniqueGameOptions.map((name) => (
-                <option key={name} value={name}>{name}</option>
-              ))}
-            </select>
-            <select
-              value={branchFilter}
-              onChange={(event) => setBranchFilter(event.target.value)}
-              className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-right"
-            >
-              <option value="all">كل الفروع</option>
-              {uniqueBranchOptions.map((name) => (
-                <option key={name} value={name}>{name}</option>
-              ))}
-            </select>
-            <select
-              value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value)}
-              className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-right"
-            >
-              <option value="all">كل الحالات</option>
-              <option value="active">نشط</option>
-              <option value="expired">منتهي</option>
-              <option value="cancelled">ملغي</option>
-            </select>
-            <select
-              value={paymentFilter}
-              onChange={(event) => setPaymentFilter(event.target.value)}
-              className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-right"
-            >
-              <option value="all">كل مبالغ الاشتراكات</option>
-              <option value="hasRemaining">عليهم مبالغ متبقية</option>
-              <option value="fullyPaid">مسدد بالكامل</option>
-            </select>
-          </div>
+
+          {/* Game filter */}
+          <select
+            value={gameFilter}
+            onChange={(event) => setGameFilter(event.target.value)}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-700 outline-none"
+          >
+            <option value="all">كل الألعاب</option>
+            {uniqueGameOptions.map((name) => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
+
+          {/* Status filter */}
+          <select
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value)}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-700 outline-none"
+          >
+            <option value="all">كل الحالات</option>
+            <option value="active">نشط</option>
+            <option value="expired">منتهي</option>
+            <option value="cancelled">ملغي</option>
+          </select>
+
+          {/* Payment filter */}
+          <select
+            value={paymentFilter}
+            onChange={(event) => setPaymentFilter(event.target.value)}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-700 outline-none"
+          >
+            <option value="all">جميع حالات الدفع</option>
+            <option value="hasRemaining">عليها متبقي</option>
+            <option value="fullyPaid">مسدد بالكامل</option>
+          </select>
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center gap-3">
+        {/* Barcode scanner sub-bar */}
+        <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
           <input
             value={barcodeInput}
             onChange={(event) => setBarcodeInput(event.target.value)}
             onKeyDown={(event) => event.key === 'Enter' && handleBarcodeSubmit()}
-            placeholder="مسح أو إدخال باركود اللاعب"
-            className="min-w-[220px] rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm outline-none"
+            placeholder="مسح باركود أو كود اللاعب (اضغط Enter)"
+            className="flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-right text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
           />
           <button
             type="button"
             onClick={handleBarcodeSubmit}
-            className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
+            className="rounded-xl bg-slate-800 px-4 py-2 text-xs font-semibold text-white transition hover:bg-slate-900"
           >
             بحث باركود
-          </button>
-          <button
-            type="button"
-            onClick={openAddSubscription}
-            className="rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700"
-          >
-            إضافة اشتراك
           </button>
         </div>
       </div>
 
-      <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
-        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-sm text-slate-500">قائمة الاشتراكات</p>
-            <p className="mt-1 text-base font-semibold text-slate-900">{filteredSubscriptions.length} اشتراك</p>
+      {/* ── Content View (Cards or Table) ── */}
+      {viewMode === 'cards' ? (
+        /* ── Compact Cards View ── */
+        filteredSubscriptions.length === 0 ? (
+          <div className="rounded-2xl border border-slate-200 bg-white p-12 text-center text-sm text-slate-400">
+            لا توجد اشتراكات ممتثلة للبحث.
           </div>
-        </div>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {filteredSubscriptions.map((sub) => {
+              const remaining = getSubscriptionRemaining(sub);
+              const endDate = new Date(sub.endDate);
+              const isCancelled = sub.status === 'cancelled';
+              const isActive = !isCancelled && endDate >= new Date() && sub.sessions > 0;
+              const hasBalance = remaining > 0 && !isCancelled;
+              const isExpiringSoon = !isCancelled && isActive && Math.ceil((endDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)) <= 2;
 
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-slate-200 text-sm">
-            <thead className="bg-slate-50 text-slate-600">
-              <tr>
-                <th className="px-3 py-3 text-right">رقم الإيصال</th>
-                <th className="px-3 py-3 text-right">كود اللاعب</th>
-                <th className="px-3 py-3 text-right">اللاعب</th>
-                <th className="px-3 py-3 text-right">اللعبة</th>
-                <th className="px-3 py-3 text-right">أيام التدريب</th>
-                <th className="px-3 py-3 text-right">توقيت التدريب</th>
-                <th className="px-3 py-3 text-right">عدد الحصص</th>
-                <th className="px-3 py-3 text-right">قيمة الاشتراك</th>
-                <th className="px-3 py-3 text-right">المبلغ المدفوع</th>
-                <th className="px-3 py-3 text-right">المتبقي</th>
-                <th className="px-3 py-3 text-right">تاريخ البداية</th>
-                <th className="px-3 py-3 text-right">تاريخ الانتهاء</th>
-                <th className="px-3 py-3 text-right">الحالة</th>
-                <th className="px-3 py-3 text-center">الإجراءات</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-200 bg-white">
-              {filteredSubscriptions.length === 0 ? (
+              return (
+                <div
+                  key={sub.id}
+                  className={`group relative flex flex-col justify-between rounded-2xl border bg-white p-4 shadow-sm transition hover:shadow-md ${
+                    hasBalance ? 'border-rose-200 bg-rose-50/20' : 'border-slate-200'
+                  }`}
+                >
+                  {/* Top card header */}
+                  <div>
+                    <div className="flex items-start justify-between gap-2 border-b border-slate-100 pb-3">
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <h3 className="font-bold text-slate-900 text-base">{sub.player}</h3>
+                          {sub.playerCode && (
+                            <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono text-slate-600">
+                              {sub.playerCode}
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-1 flex items-center gap-2 text-xs text-slate-500">
+                          <span className="font-medium text-sky-700 bg-sky-50 px-2 py-0.5 rounded-md">
+                            ⚽ {sub.game}
+                          </span>
+                          {sub.branch && <span className="text-slate-400">• {sub.branch}</span>}
+                          {sub.invoiceNumber && <span className="text-slate-400"># {sub.invoiceNumber}</span>}
+                        </div>
+                      </div>
+
+                      <span className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-bold ${statusBadgeStyle(sub.status)}`}>
+                        {statusLabel(sub.status)}
+                      </span>
+                    </div>
+
+                    {/* Schedule & Time */}
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-600">
+                      <div className="flex items-center gap-1 bg-slate-50 p-2 rounded-lg">
+                        <AppIcon icon={Calendar} className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+                        <span className="truncate">{formattedSchedule(sub)}</span>
+                      </div>
+                      <div className="flex items-center gap-1 bg-slate-50 p-2 rounded-lg">
+                        <AppIcon icon={Clock} className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+                        <span className="truncate">{formattedTrainingTime(sub)}</span>
+                      </div>
+                    </div>
+
+                    {/* Metrics Grid */}
+                    <div className="mt-3 grid grid-cols-3 gap-2 rounded-xl bg-slate-50/80 p-2.5 text-center text-xs">
+                      <div>
+                        <span className="text-[10px] text-slate-400 block">الحصص</span>
+                        <span className="font-bold text-slate-800">{sub.sessions}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-400 block">المدفوع</span>
+                        <span className="font-bold text-emerald-600">{sub.paidAmount} ج</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-400 block">المتبقي</span>
+                        <span className={`font-bold ${remaining > 0 ? 'text-rose-600' : 'text-slate-700'}`}>
+                          {remaining} ج
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Dates */}
+                    <div className="mt-3 flex items-center justify-between text-[11px] text-slate-400 border-t border-slate-100 pt-2">
+                      <span>من: {sub.startDate || '-'}</span>
+                      <span>إلى: {sub.endDate || '-'}</span>
+                    </div>
+                  </div>
+
+                  {/* Actions Footer Toolbar */}
+                  <div className="mt-4 flex items-center gap-1.5 border-t border-slate-100 pt-3 text-xs">
+                    {canEditSubs && (
+                      <button
+                        type="button"
+                        onClick={() => openEditSubscription(sub)}
+                        disabled={isCancelled}
+                        title="تعديل"
+                        className="flex-1 rounded-lg border border-slate-200 py-1.5 font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                      >
+                        تعديل
+                      </button>
+                    )}
+                    {canEditSubs && remaining > 0 && !isCancelled && (
+                      <button
+                        type="button"
+                        onClick={() => collectRemainingPayment(sub)}
+                        className="flex-1 rounded-lg bg-amber-500 py-1.5 font-semibold text-slate-900 hover:bg-amber-600"
+                      >
+                        سداد
+                      </button>
+                    )}
+                    {canEditSubs && (!isActive || isExpiringSoon) && !isCancelled && (
+                      <button
+                        type="button"
+                        onClick={() => openRenewModal(sub)}
+                        className="flex-1 rounded-lg bg-emerald-600 py-1.5 font-semibold text-white hover:bg-emerald-700"
+                      >
+                        تجديد
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => showInvoice(sub)}
+                      title="الفاتورة"
+                      className="rounded-lg bg-slate-100 p-1.5 text-slate-600 hover:bg-slate-200"
+                    >
+                      <AppIcon icon={File02} className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => processAndSendInvoice(sub)}
+                      title="واتساب"
+                      className="rounded-lg bg-emerald-100 p-1.5 text-emerald-700 hover:bg-emerald-200"
+                    >
+                      <AppIcon icon={MessageChatCircle} className="h-4 w-4" />
+                    </button>
+                    {canEditSubs && (
+                      <button
+                        type="button"
+                        onClick={() => deleteSubscription(sub.id)}
+                        title="حذف"
+                        className="rounded-lg bg-slate-100 p-1.5 text-rose-600 hover:bg-rose-100"
+                      >
+                        <AppIcon icon={Trash01} className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )
+      ) : (
+        /* ── Compact Table View ── */
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-right text-xs divide-y divide-slate-200">
+              <thead className="bg-slate-50 text-slate-500">
                 <tr>
-                  <td colSpan={14} className="px-4 py-10 text-center text-slate-500">
-                    لا توجد اشتراكات حتى الآن
-                  </td>
+                  <th className="px-4 py-3 font-semibold">الإيصال</th>
+                  <th className="px-4 py-3 font-semibold">كود اللاعب</th>
+                  <th className="px-4 py-3 font-semibold">اللاعب</th>
+                  <th className="px-4 py-3 font-semibold">اللعبة</th>
+                  <th className="px-4 py-3 font-semibold">أيام التدريب</th>
+                  <th className="px-4 py-3 font-semibold">الحصص</th>
+                  <th className="px-4 py-3 font-semibold">القيم (اشتراك / مدفوع / متبقي)</th>
+                  <th className="px-4 py-3 font-semibold">المدة</th>
+                  <th className="px-4 py-3 font-semibold">الحالة</th>
+                  <th className="px-4 py-3 text-center font-semibold">الإجراءات</th>
                 </tr>
-              ) : (
-                filteredSubscriptions.map((sub) => {
+              </thead>
+              <tbody className="divide-y divide-slate-100 bg-white">
+                {filteredSubscriptions.map((sub) => {
                   const remaining = getSubscriptionRemaining(sub);
-                  const endDate = new Date(sub.endDate);
                   const isCancelled = sub.status === 'cancelled';
-                  const isActive = !isCancelled && endDate >= new Date() && sub.sessions > 0;
-                  const hasBalance = remaining > 0 && !isCancelled;
-                  const isExpiringSoon = !isCancelled && isActive && Math.ceil((endDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)) <= 2;
-
                   return (
-                    <tr key={sub.id} className={hasBalance ? 'bg-rose-50' : ''}>
-                      <td className="px-3 py-3 font-semibold text-slate-800">{sub.invoiceNumber || '-'}</td>
-                      <td className="px-3 py-3 text-slate-700">{sub.playerCode || ''}</td>
-                      <td className="px-3 py-3 text-slate-900">{sub.player}</td>
-                      <td className="px-3 py-3 text-slate-700">{sub.game}</td>
-                      <td className="px-3 py-3 text-slate-700">{formattedSchedule(sub)}</td>
-                      <td className="px-3 py-3 text-slate-700">{formattedTrainingTime(sub)}</td>
-                      <td className="px-3 py-3 text-slate-700">{sub.sessions}</td>
-                      <td className="px-3 py-3 text-slate-700">{sub.subscriptionValue}</td>
-                      <td className="px-3 py-3 text-slate-700">{sub.paidAmount || 0}</td>
-                      <td className="px-3 py-3 text-slate-700">{remaining}</td>
-                      <td className="px-3 py-3 text-slate-700">{sub.startDate}</td>
-                      <td className="px-3 py-3 text-slate-700">{sub.endDate}</td>
-                      <td className="px-3 py-3">
-                        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${statusClasses(sub.status)}`}>
+                    <tr key={sub.id} className="hover:bg-slate-50/70">
+                      <td className="px-4 py-3 font-mono font-medium text-slate-700">{sub.invoiceNumber || '-'}</td>
+                      <td className="px-4 py-3 font-mono text-slate-500">{sub.playerCode || '-'}</td>
+                      <td className="px-4 py-3 font-bold text-slate-900">{sub.player}</td>
+                      <td className="px-4 py-3 text-slate-700">{sub.game}</td>
+                      <td className="px-4 py-3 text-slate-600">{formattedSchedule(sub)}</td>
+                      <td className="px-4 py-3 font-bold text-slate-800">{sub.sessions}</td>
+                      <td className="px-4 py-3">
+                        <span className="text-slate-700">{sub.subscriptionValue}ج</span> /{' '}
+                        <span className="text-emerald-600 font-semibold">{sub.paidAmount}ج</span> /{' '}
+                        <span className={`font-semibold ${remaining > 0 ? 'text-rose-600' : 'text-slate-400'}`}>{remaining}ج</span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-500">{sub.startDate} إلى {sub.endDate}</td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold ${statusBadgeStyle(sub.status)}`}>
                           {statusLabel(sub.status)}
                         </span>
                       </td>
-                      <td className="px-3 py-3">
-                        <div className="grid grid-cols-2 gap-2">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-center gap-1">
                           {canEditSubs && (
                             <button
                               type="button"
                               onClick={() => openEditSubscription(sub)}
                               disabled={isCancelled}
-                              className="rounded-2xl bg-violet-600 px-2 py-2 text-xs font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+                              className="rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-200 disabled:opacity-40"
                             >
                               تعديل
                             </button>
                           )}
-                          {canEditSubs && remaining > 0 ? (
+                          {canEditSubs && remaining > 0 && !isCancelled && (
                             <button
                               type="button"
                               onClick={() => collectRemainingPayment(sub)}
-                              className="rounded-2xl bg-amber-500 px-2 py-2 text-xs font-semibold text-slate-900 transition hover:bg-amber-600"
+                              className="rounded-lg bg-amber-500 px-2 py-1 text-[11px] font-semibold text-slate-900 hover:bg-amber-600"
                             >
                               سداد
-                            </button>
-                          ) : (
-                            <div />
-                          )}
-                          {canEditSubs && (!isActive || isExpiringSoon) && !isCancelled ? (
-                            <button
-                              type="button"
-                              onClick={() => openRenewModal(sub)}
-                              className="rounded-2xl bg-emerald-600 px-2 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700"
-                            >
-                              تجديد
-                            </button>
-                          ) : (
-                            <div />
-                          )}
-                          {canEditSubs && !isCancelled ? (
-                            <button
-                              type="button"
-                              onClick={() => refundSubscription(sub)}
-                              className="rounded-2xl bg-rose-600 px-2 py-2 text-xs font-semibold text-white transition hover:bg-rose-700"
-                            >
-                              إلغاء
-                            </button>
-                          ) : (
-                            <div />
-                          )}
-                          {canEditSubs && (
-                            <button
-                              type="button"
-                              onClick={() => deleteSubscription(sub.id)}
-                              className="rounded-2xl bg-slate-700 px-2 py-2 text-xs font-semibold text-white transition hover:bg-slate-800"
-                            >
-                              حذف
                             </button>
                           )}
                           <button
                             type="button"
                             onClick={() => showInvoice(sub)}
-                            className="rounded-2xl bg-sky-600 px-2 py-2 text-xs font-semibold text-white transition hover:bg-sky-700"
+                            className="rounded-lg bg-sky-100 px-2 py-1 text-[11px] font-semibold text-sky-700 hover:bg-sky-200"
                           >
                             فاتورة
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => processAndSendInvoice(sub)}
-                            className="rounded-2xl bg-emerald-500 px-2 py-2 text-xs font-semibold text-slate-900 transition hover:bg-emerald-600"
-                          >
-                            واتساب
                           </button>
                         </div>
                       </td>
                     </tr>
                   );
-                })
-              )}
-            </tbody>
-          </table>
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      )}
 
+      {/* ── Add / Edit Modal ── */}
       {isSubscriptionModalOpen ? (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/60 p-4">
-          <div className="w-full max-w-2xl max-h-[calc(100vh-4rem)] overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl">
-            <div className="flex items-start justify-between gap-4">
+          <div className="w-full max-w-xl max-h-[calc(100vh-3rem)] overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-3">
               <div>
-                <h2 className="text-2xl font-semibold text-slate-900">
-                  {formState.id ? 'تعديل الاشتراك' : 'إضافة اشتراك'}
+                <h2 className="text-lg font-bold text-slate-900">
+                  {formState.id ? 'تعديل الاشتراك' : 'إضافة اشتراك جديد'}
                 </h2>
-                <p className="mt-2 text-sm text-slate-500">املأ بيانات الاشتراك واضغط حفظ.</p>
+                <p className="text-xs text-slate-500">ادخل بيانات الاشتراك كاملة ثم اضغط حفظ</p>
               </div>
-              <button type="button" onClick={closeSubscriptionModal} className="text-slate-500 transition hover:text-slate-900">
+              <button type="button" onClick={closeSubscriptionModal} className="text-slate-400 hover:text-slate-800 text-xl font-bold">
                 ×
               </button>
             </div>
-            <form onSubmit={handleSubscriptionSave} className="mt-6 grid gap-4 lg:grid-cols-2">
-              <div className="space-y-3">
-                <label className="block text-sm font-semibold text-slate-700">اللاعب</label>
+
+            <form onSubmit={handleSubscriptionSave} className="mt-4 grid gap-3 sm:grid-cols-2 text-xs">
+              <div className="space-y-1">
+                <label className="font-semibold text-slate-700">اللاعب</label>
                 <select
                   value={formState.playerId}
                   onChange={(event) => updateForm('playerId', event.target.value)}
                   required
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-right outline-none"
                 >
                   <option value="">اختر اللاعب</option>
                   {players.map((player) => (
@@ -1206,13 +1297,13 @@ export default function Subscriptions() {
                 </select>
               </div>
 
-              <div className="space-y-3">
-                <label className="block text-sm font-semibold text-slate-700">اللعبة</label>
+              <div className="space-y-1">
+                <label className="font-semibold text-slate-700">اللعبة</label>
                 <select
                   value={formState.game}
                   onChange={(event) => updateForm('game', event.target.value)}
                   required
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-right outline-none"
                 >
                   <option value="">اختر اللعبة</option>
                   {games.map((game) => (
@@ -1221,16 +1312,16 @@ export default function Subscriptions() {
                 </select>
               </div>
 
-              <div className="lg:col-span-2">
-                <label className="block text-sm font-semibold text-slate-700">أيام التدريب</label>
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="sm:col-span-2 space-y-1">
+                <label className="font-semibold text-slate-700">أيام التدريب</label>
+                <div className="flex flex-wrap gap-2">
                   {TRAINING_DAYS.map((day) => (
-                    <label key={day} className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                    <label key={day} className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-slate-700 cursor-pointer">
                       <input
                         type="checkbox"
                         checked={formState.schedule.includes(day)}
                         onChange={() => handleTrainingDayToggle(day)}
-                        className="h-4 w-4 rounded border-slate-300"
+                        className="h-3.5 w-3.5 rounded border-slate-300"
                       />
                       {day}
                     </label>
@@ -1238,93 +1329,106 @@ export default function Subscriptions() {
                 </div>
               </div>
 
-              <div className="lg:col-span-2">
-                <label className="block text-sm font-semibold text-slate-700">توقيت التدريب (اختياري)</label>
-                <div className="flex flex-col gap-3 sm:flex-row">
+              <div className="sm:col-span-2 space-y-1">
+                <label className="font-semibold text-slate-700">توقيت التدريب (اختياري)</label>
+                <div className="flex items-center gap-2">
                   <input
                     value={formState.trainingTimeStart}
                     onChange={(event) => updateForm('trainingTimeStart', event.target.value)}
                     type="time"
-                    title="من"
-                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2 text-right outline-none"
                   />
-                  <span className="flex items-center justify-center text-sm text-slate-500">إلى</span>
+                  <span className="text-slate-400">إلى</span>
                   <input
                     value={formState.trainingTimeEnd}
                     onChange={(event) => updateForm('trainingTimeEnd', event.target.value)}
                     type="time"
-                    title="إلى"
-                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2 text-right outline-none"
                   />
                 </div>
               </div>
 
-              <div className="space-y-3">
-                <label className="block text-sm font-semibold text-slate-700">عدد الحصص</label>
+              <div className="space-y-1">
+                <label className="font-semibold text-slate-700">عدد الحصص</label>
                 <input
-                  value={formState.sessions}
-                  onChange={(event) => updateForm('sessions', Number(event.target.value))}
+                  value={formState.sessions === 0 ? '' : formState.sessions}
+                  onChange={(event) => updateForm('sessions', Math.max(0, Number(event.target.value)))}
                   type="number"
+                  min={0}
                   required
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-right outline-none"
                 />
               </div>
-              <div className="space-y-3">
-                <label className="block text-sm font-semibold text-slate-700">قيمة الاشتراك</label>
+
+              <div className="space-y-1">
+                <label className="font-semibold text-slate-700">قيمة الاشتراك</label>
                 <input
-                  value={formState.subscriptionValue}
-                  onChange={(event) => updateForm('subscriptionValue', Number(event.target.value))}
+                  value={formState.subscriptionValue === 0 ? '' : formState.subscriptionValue}
+                  onChange={(event) => updateForm('subscriptionValue', Math.max(0, Number(event.target.value)))}
                   type="number"
+                  min={0}
                   required
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-right outline-none"
                 />
               </div>
-              <div className="space-y-3">
-                <label className="block text-sm font-semibold text-slate-700">المبلغ المدفوع</label>
+
+              <div className="space-y-1">
+                <label className="font-semibold text-slate-700">المبلغ المدفوع</label>
                 <input
-                  value={formState.paidAmount}
-                  onChange={(event) => updateForm('paidAmount', Number(event.target.value))}
+                  value={formState.paidAmount === 0 ? '' : formState.paidAmount}
+                  onChange={(event) => updateForm('paidAmount', Math.max(0, Number(event.target.value)))}
                   type="number"
+                  min={0}
                   required
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-right outline-none"
                 />
               </div>
-              <div className="space-y-3">
-                <label className="block text-sm font-semibold text-slate-700">تاريخ البداية</label>
+
+              <div className="space-y-1">
+                <label className="font-semibold text-slate-700">تاريخ البداية</label>
                 <input
                   value={formState.startDate}
                   onChange={(event) => updateForm('startDate', event.target.value)}
                   type="date"
                   required
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-right outline-none"
                 />
               </div>
-              <div className="space-y-3">
-                <label className="block text-sm font-semibold text-slate-700">تاريخ الانتهاء</label>
+
+              <div className="space-y-1">
+                <label className="font-semibold text-slate-700">تاريخ الانتهاء</label>
                 <input
                   value={formState.endDate}
                   onChange={(event) => updateForm('endDate', event.target.value)}
                   type="date"
                   required
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-right outline-none"
                 />
               </div>
-              <div className="space-y-3 lg:col-span-2">
-                <label className="block text-sm font-semibold text-slate-700">رقم الإيصال (يدوي)</label>
+
+              <div className="space-y-1 sm:col-span-2">
+                <label className="font-semibold text-slate-700">رقم الإيصال (اختياري)</label>
                 <input
                   value={formState.invoiceNumber}
                   onChange={(event) => updateForm('invoiceNumber', event.target.value)}
                   type="text"
-                  placeholder="مثلاً: 12345"
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm"
+                  placeholder="12345"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-right outline-none"
                 />
               </div>
 
-              <div className="lg:col-span-2 flex flex-wrap gap-3">
-                <button type="button" onClick={closeSubscriptionModal} className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
+              <div className="sm:col-span-2 flex justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={closeSubscriptionModal}
+                  className="rounded-xl border border-slate-200 px-4 py-2 font-semibold text-slate-700 hover:bg-slate-50"
+                >
                   إلغاء
                 </button>
-                <button type="submit" className="rounded-2xl bg-sky-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-sky-700">
+                <button
+                  type="submit"
+                  className="rounded-xl bg-sky-600 px-5 py-2 font-semibold text-white hover:bg-sky-700"
+                >
                   حفظ
                 </button>
               </div>
@@ -1333,79 +1437,78 @@ export default function Subscriptions() {
         </div>
       ) : null}
 
+      {/* ── Renew Modal ── */}
       {isRenewModalOpen ? (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/60 p-4">
-          <div className="w-full max-w-2xl rounded-3xl bg-white p-6 shadow-2xl">
-            <div className="flex items-start justify-between gap-4">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-3">
               <div>
-                <h2 className="text-2xl font-semibold text-slate-900">تجديد الاشتراك وأرشفة القديم</h2>
-                <p className="mt-2 text-sm text-slate-500">حدد البيانات الجديدة للتجديد.</p>
+                <h2 className="text-lg font-bold text-slate-900">تجديد الاشتراك</h2>
+                <p className="text-xs text-slate-500">سيتم تجديد الاشتراك وأرشفة السجل السابق تلقائياً</p>
               </div>
-              <button type="button" onClick={closeModals} className="text-slate-500 transition hover:text-slate-900">
+              <button type="button" onClick={closeModals} className="text-slate-400 hover:text-slate-800 text-xl font-bold">
                 ×
               </button>
             </div>
-            <div className="mt-6 grid gap-4 lg:grid-cols-2">
-              <div className="space-y-3">
-                <label className="block text-sm font-semibold text-slate-700">تاريخ البدء الجديد</label>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 text-xs">
+              <div className="space-y-1">
+                <label className="font-semibold text-slate-700">تاريخ البدء</label>
                 <input
                   value={renewState.startDate}
                   onChange={(event) => setRenewState((prev) => ({ ...prev, startDate: event.target.value }))}
                   type="date"
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-right outline-none"
                 />
               </div>
-              <div className="space-y-3">
-                <label className="block text-sm font-semibold text-slate-700">تاريخ الانتهاء الجديد</label>
+              <div className="space-y-1">
+                <label className="font-semibold text-slate-700">تاريخ الانتهاء</label>
                 <input
                   value={renewState.endDate}
                   onChange={(event) => setRenewState((prev) => ({ ...prev, endDate: event.target.value }))}
                   type="date"
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-right outline-none"
                 />
               </div>
-              <div className="space-y-3">
-                <label className="block text-sm font-semibold text-slate-700">عدد الحصص</label>
+              <div className="space-y-1">
+                <label className="font-semibold text-slate-700">عدد الحصص</label>
                 <input
                   value={renewState.sessions}
                   onChange={(event) => setRenewState((prev) => ({ ...prev, sessions: Number(event.target.value) }))}
                   type="number"
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-right outline-none"
                 />
               </div>
-              <div className="space-y-3">
-                <label className="block text-sm font-semibold text-slate-700">قيمة الاشتراك الجديد</label>
+              <div className="space-y-1">
+                <label className="font-semibold text-slate-700">قيمة الاشتراك</label>
                 <input
                   value={renewState.price}
                   onChange={(event) => setRenewState((prev) => ({ ...prev, price: Number(event.target.value) }))}
                   type="number"
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-right outline-none"
                 />
               </div>
-              <div className="space-y-3">
-                <label className="block text-sm font-semibold text-slate-700">المبلغ المدفوع الآن</label>
+              <div className="space-y-1 sm:col-span-2">
+                <label className="font-semibold text-slate-700">المبلغ المدفوع الآن</label>
                 <input
                   value={renewState.paidAmount}
                   onChange={(event) => setRenewState((prev) => ({ ...prev, paidAmount: Number(event.target.value) }))}
                   type="number"
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-right outline-none"
                 />
               </div>
-              <div className="space-y-3 lg:col-span-2">
-                <label className="block text-sm font-semibold text-slate-700">رقم إيصال التجديد</label>
-                <input
-                  value={renewState.invoiceNumber}
-                  onChange={(event) => setRenewState((prev) => ({ ...prev, invoiceNumber: event.target.value }))}
-                  type="text"
-                  placeholder="رقم إيصال السداد الجديد"
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm"
-                />
-              </div>
-              <div className="lg:col-span-2 flex flex-wrap gap-3">
-                <button type="button" onClick={closeModals} className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
+              <div className="sm:col-span-2 flex justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={closeModals}
+                  className="rounded-xl border border-slate-200 px-4 py-2 font-semibold text-slate-700 hover:bg-slate-50"
+                >
                   إلغاء
                 </button>
-                <button type="button" onClick={confirmRenewal} className="rounded-2xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700">
+                <button
+                  type="button"
+                  onClick={confirmRenewal}
+                  className="rounded-xl bg-emerald-600 px-5 py-2 font-semibold text-white hover:bg-emerald-700"
+                >
                   تأكيد التجديد
                 </button>
               </div>
@@ -1414,42 +1517,43 @@ export default function Subscriptions() {
         </div>
       ) : null}
 
+      {/* ── Invoice Modal ── */}
       {isInvoiceModalOpen ? (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/60 p-4">
-          <div className="w-full max-w-3xl rounded-3xl bg-white p-6 shadow-2xl">
-            <div className="flex items-start justify-between gap-4">
+          <div className="w-full max-w-2xl rounded-2xl bg-white p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-3">
               <div>
-                <h2 className="text-2xl font-semibold text-slate-900">فاتورة الاشتراك</h2>
-                <p className="mt-2 text-sm text-slate-500">اعرض الفاتورة أو قم بتنزيلها أو إرسالها عبر واتساب.</p>
+                <h2 className="text-lg font-bold text-slate-900">معاينة الفاتورة الرقمية</h2>
+                <p className="text-xs text-slate-500">طباعة، تنزيل أو مشاركة الفاتورة عبر واتساب</p>
               </div>
-              <button type="button" onClick={closeModals} className="text-slate-500 transition hover:text-slate-900">
+              <button type="button" onClick={closeModals} className="text-slate-400 hover:text-slate-800 text-xl font-bold">
                 ×
               </button>
             </div>
-            <div className="mt-6 text-center">
-              <canvas ref={invoiceCanvasRef} width={800} height={1200} className="mx-auto max-h-[65vh] w-auto max-w-full rounded-3xl border border-slate-200" />
+            <div className="mt-4 text-center">
+              <canvas ref={invoiceCanvasRef} width={800} height={1200} className="mx-auto max-h-[55vh] w-auto rounded-xl border border-slate-200 shadow-sm" />
             </div>
-            <div className="mt-6 flex flex-wrap justify-center gap-3">
+            <div className="mt-4 flex flex-wrap justify-center gap-2 border-t border-slate-100 pt-3">
               <button
                 type="button"
                 onClick={sendInvoiceWhatsApp}
-                className="rounded-2xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700"
+                className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-700"
               >
-                واتساب
+                مشاركة واتساب 💬
               </button>
               <button
                 type="button"
                 onClick={downloadInvoiceJPG}
-                className="rounded-2xl bg-sky-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-sky-700"
+                className="rounded-xl bg-sky-600 px-4 py-2 text-xs font-semibold text-white hover:bg-sky-700"
               >
-                حفظ JPG
+                تنزيل صورة JPG
               </button>
               <button
                 type="button"
                 onClick={exportInvoicePDF}
-                className="rounded-2xl bg-violet-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-violet-700"
+                className="rounded-xl bg-violet-600 px-4 py-2 text-xs font-semibold text-white hover:bg-violet-700"
               >
-                تحميل PDF
+                تنزيل PDF
               </button>
             </div>
           </div>

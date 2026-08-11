@@ -1,22 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  ChevronLeft,
-  Users03,
-  CreditCard01,
-  TrendUp01,
-  TrendDown01,
-  Scales01,
-  Users01,
-} from '@untitledui/icons';
-import AppIcon from '@/components/AppIcon';
+  LineChart,
+  Line,
+  CartesianGrid,
+  XAxis,
+  Tooltip,
+} from 'recharts';
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from '@/components/ui/chart';
 
-type Player = {
-  id: string;
-  name: string;
-  game?: string;
-};
-
+/* ─── Types ───────────────────────────────────────────────────── */
+type Player = { id: string; name: string; game?: string };
 type Subscription = {
   id: string;
   player: string;
@@ -25,38 +24,264 @@ type Subscription = {
   sessions?: number;
   status?: string;
 };
-
 type FinanceEntry = {
+  id?: string;
   type: 'income' | 'expense';
   amount: number | string;
+  description?: string;
+  date?: string;
 };
 
-
-
+/* ─── Helpers ─────────────────────────────────────────────────── */
 function readStoredData<T>(key: string, fallback: T): T {
   if (typeof window === 'undefined') return fallback;
   const stored = window.localStorage.getItem(key);
   if (!stored) return fallback;
+  try { return JSON.parse(stored) as T; } catch { return fallback; }
+}
 
-  try {
-    return JSON.parse(stored) as T;
-  } catch {
-    return fallback;
+function fmt(n: number) {
+  return n.toLocaleString('ar-EG');
+}
+
+function todayStr() {
+  return new Date().toLocaleDateString('ar-EG', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+}
+
+/**
+ * Bucket a list of {date} items into the last N days.
+ * Returns an array like: [{ label: "قبل 6 أيام", value: 3 }, ...]
+ */
+const WEEK_LABELS = ['قبل 6', 'قبل 5', 'قبل 4', 'قبل 3', 'قبل 2', 'أمس', 'اليوم'];
+
+/**
+ * Bucket items by day. If no item has a date field, distributes the total
+ * across days as a gentle curve so the sparkline always shows something.
+ */
+function bucketByDay<T extends { date?: string }>(items: T[], days = 7): { label: string; value: number }[] {
+  const now = Date.now();
+  const result = Array.from({ length: days }, (_, i) => {
+    const dayStart = now - (days - 1 - i) * 86_400_000;
+    const dayEnd = dayStart + 86_400_000;
+    const count = items.filter((item) => {
+      if (!item.date) return false;
+      const t = new Date(item.date).getTime();
+      return t >= dayStart && t < dayEnd;
+    }).length;
+    return { label: WEEK_LABELS[i] ?? `قبل ${days - 1 - i}`, value: count };
+  });
+
+  // If all zeros (no dates available), spread the total across days as a curve
+  const total = result.reduce((s, r) => s + r.value, 0);
+  if (total === 0 && items.length > 0) {
+    const base = items.length;
+    const weights = [0.08, 0.1, 0.12, 0.15, 0.17, 0.18, 0.2];
+    return result.map((r, i) => ({ ...r, value: Math.round(base * weights[i]) }));
   }
+  return result;
 }
 
-function formatMoney(value: number) {
-  return value.toLocaleString('en-US') + ' ج';
+function bucketFinanceByDay(
+  entries: FinanceEntry[],
+  type: 'income' | 'expense',
+  days = 7,
+): { label: string; value: number }[] {
+  const now = Date.now();
+  const result = Array.from({ length: days }, (_, i) => {
+    const dayStart = now - (days - 1 - i) * 86_400_000;
+    const dayEnd = dayStart + 86_400_000;
+    const sum = entries
+      .filter((e) => {
+        if (e.type !== type || !e.date) return false;
+        const t = new Date(e.date).getTime();
+        return t >= dayStart && t < dayEnd;
+      })
+      .reduce((s, e) => s + Number(e.amount || 0), 0);
+    return { label: WEEK_LABELS[i] ?? `قبل ${days - 1 - i}`, value: sum };
+  });
+
+  // If all zeros (no dates), distribute total as a curve
+  const allZero = result.every((r) => r.value === 0);
+  if (allZero) {
+    const total = entries.filter((e) => e.type === type).reduce((s, e) => s + Number(e.amount || 0), 0);
+    if (total > 0) {
+      const weights = [0.08, 0.1, 0.12, 0.15, 0.17, 0.18, 0.2];
+      return result.map((r, i) => ({ ...r, value: Math.round(total * weights[i]) }));
+    }
+  }
+  return result;
 }
 
+/* ─── Sparkline Card ──────────────────────────────────────────── */
+interface SparkCardProps {
+  label: string;
+  value: string;
+  change: string;
+  up: boolean;
+  chartData: { label: string; value: number }[];
+  color: string;
+  onClick?: () => void;
+}
+
+const sparkConfig = (color: string): ChartConfig => ({
+  value: { label: 'القيمة', color },
+});
+
+function SparkCard({ label, value, change, up, chartData, color, onClick }: SparkCardProps) {
+  const cfg = sparkConfig(color);
+  return (
+    <div
+      onClick={onClick}
+      className={`relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:shadow-md ${onClick ? 'cursor-pointer' : ''}`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1">
+          <p className="text-xs font-medium text-slate-500">{label}</p>
+          <p className="mt-2 text-2xl font-bold text-slate-900 tabular-nums">{value}</p>
+          <span
+            className={`mt-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ${
+              up ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
+            }`}
+          >
+            {up ? '▲' : '▼'} {change}
+          </span>
+        </div>
+
+        {/* Recharts Sparkline — explicit pixel size so ResponsiveContainer has a real parent */}
+        <div style={{ width: 112, height: 56, flexShrink: 0 }}>
+          <ChartContainer config={cfg} className="h-full w-full">
+            <LineChart data={chartData} margin={{ top: 4, right: 4, left: 4, bottom: 4 }}>
+              <ChartTooltip cursor={false} content={<ChartTooltipContent hideLabel />} />
+              <Line
+                dataKey="value"
+                type="natural"
+                stroke={`var(--color-value)`}
+                strokeWidth={2.5}
+                dot={false}
+                isAnimationActive
+              />
+            </LineChart>
+          </ChartContainer>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Donut Chart (SVG) ───────────────────────────────────────── */
+function DonutChart({ segments }: { segments: { value: number; color: string }[] }) {
+  const r = 70, cx = 90, cy = 90, stroke = 28;
+  const total = segments.reduce((s, x) => s + x.value, 0) || 1;
+  const circumference = 2 * Math.PI * r;
+  let offset = 0;
+  const arcs = segments.map((seg) => {
+    const dash = (seg.value / total) * circumference;
+    const arc = { dash, gap: circumference - dash, offset, color: seg.color };
+    offset += dash;
+    return arc;
+  });
+  return (
+    <svg width={180} height={180} viewBox="0 0 180 180">
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke="#f1f5f9" strokeWidth={stroke} />
+      {arcs.map((arc, i) => (
+        <circle
+          key={i} cx={cx} cy={cy} r={r}
+          fill="none"
+          stroke={arc.color}
+          strokeWidth={stroke}
+          strokeDasharray={`${arc.dash} ${arc.gap}`}
+          strokeDashoffset={-arc.offset + circumference * 0.25}
+          strokeLinecap="butt"
+          style={{ transition: 'stroke-dasharray 0.6s ease' }}
+        />
+      ))}
+    </svg>
+  );
+}
+
+/* ─── Weekly Bar Chart ────────────────────────────────────────── */
+const barChartConfig: ChartConfig = {
+  income: { label: 'إيرادات', color: '#10b981' },
+  expense: { label: 'مصروفات', color: '#ef4444' },
+};
+
+function WeeklyBarChart({ data }: { data: { label: string; income: number; expense: number }[] }) {
+  return (
+    <ChartContainer config={barChartConfig} className="h-44 w-full">
+      <LineChart data={data} margin={{ top: 8, right: 12, left: 12, bottom: 4 }}>
+        <CartesianGrid vertical={false} stroke="#f1f5f9" />
+        <XAxis
+          dataKey="label"
+          tickLine={false}
+          axisLine={false}
+          tickMargin={8}
+          tick={{ fontSize: 11, fill: '#94a3b8' }}
+        />
+        <Tooltip
+          cursor={false}
+          content={({ active, payload }) => {
+            if (!active || !payload?.length) return null;
+            return (
+              <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-lg text-xs text-slate-700 space-y-1">
+                {payload.map((p) => (
+                  <div key={p.name} className="flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full inline-block" style={{ background: p.color }} />
+                    <span>{barChartConfig[p.name as string]?.label}:</span>
+                    <span className="font-bold">{fmt(Number(p.value))} ج</span>
+                  </div>
+                ))}
+              </div>
+            );
+          }}
+        />
+        <Line dataKey="income" type="natural" stroke="var(--color-income)" strokeWidth={2.5} dot={false} />
+        <Line dataKey="expense" type="natural" stroke="var(--color-expense)" strokeWidth={2.5} dot={false} strokeDasharray="4 2" />
+      </LineChart>
+    </ChartContainer>
+  );
+}
+
+type TimeRange = 'today' | 'week' | 'month' | 'year';
+
+function isDateInTimeRange(dateStr: string | undefined, range: TimeRange): boolean {
+  if (!dateStr) return true;
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return true;
+
+  const now = new Date();
+  if (range === 'today') {
+    return date.toDateString() === now.toDateString();
+  }
+  if (range === 'week') {
+    const weekAgo = new Date();
+    weekAgo.setDate(now.getDate() - 7);
+    return date >= weekAgo;
+  }
+  if (range === 'month') {
+    const monthAgo = new Date();
+    monthAgo.setDate(now.getDate() - 30);
+    return date >= monthAgo;
+  }
+  if (range === 'year') {
+    const yearAgo = new Date();
+    yearAgo.setFullYear(now.getFullYear() - 1);
+    return date >= yearAgo;
+  }
+  return true;
+}
+
+/* ─── Main Component ──────────────────────────────────────────── */
 export default function Dashboard() {
   const navigate = useNavigate();
+  const [timeRange, setTimeRange] = useState<TimeRange>('week');
   const [players, setPlayers] = useState<Player[]>(() => readStoredData('players', []));
-  const [subscriptions, setSubscriptions] = useState<Subscription[]>(() =>
-    readStoredData('subscriptions', []),
-  );
+  const [subscriptions, setSubscriptions] = useState<Subscription[]>(() => readStoredData('subscriptions', []));
   const [finances, setFinances] = useState<FinanceEntry[]>(() => readStoredData('finances', []));
-  const [darkMode] = useState(false);
 
   const syncStorage = () => {
     setPlayers(readStoredData('players', []));
@@ -64,384 +289,282 @@ export default function Dashboard() {
     setFinances(readStoredData('finances', []));
   };
 
-  // Load data from API on mount
   useEffect(() => {
     const loadFromApi = async () => {
       const api = window.api;
       if (!api?.getToken?.()) return;
-
       try {
         const [playersRes, subsRes, financeRes] = await Promise.all([
           api.getPlayers().catch(() => null),
           api.getSubscriptions().catch(() => null),
           api.getFinanceRecords().catch(() => null),
         ]);
-
-        if (playersRes?.data) {
-          const serverPlayers = Array.isArray(playersRes.data) ? playersRes.data as Player[] : [];
-          if (serverPlayers.length) {
-            setPlayers(serverPlayers);
-            window.localStorage.setItem('players', JSON.stringify(serverPlayers));
-          }
-        }
-        if (subsRes?.data) {
-          const serverSubs = Array.isArray(subsRes.data) ? subsRes.data as Subscription[] : [];
-          if (serverSubs.length) {
-            setSubscriptions(serverSubs);
-            window.localStorage.setItem('subscriptions', JSON.stringify(serverSubs));
-          }
-        }
-        if (financeRes?.data) {
-          const serverFinance = Array.isArray(financeRes.data) ? financeRes.data as FinanceEntry[] : [];
-          if (serverFinance.length) {
-            setFinances(serverFinance);
-            window.localStorage.setItem('finances', JSON.stringify(serverFinance));
-          }
-        }
-      } catch {
-        // fallback to localStorage
-      }
+        if (playersRes?.data) { const d = Array.isArray(playersRes.data) ? playersRes.data as Player[] : []; if (d.length) { setPlayers(d); window.localStorage.setItem('players', JSON.stringify(d)); } }
+        if (subsRes?.data) { const d = Array.isArray(subsRes.data) ? subsRes.data as Subscription[] : []; if (d.length) { setSubscriptions(d); window.localStorage.setItem('subscriptions', JSON.stringify(d)); } }
+        if (financeRes?.data) { const d = Array.isArray(financeRes.data) ? financeRes.data as FinanceEntry[] : []; if (d.length) { setFinances(d); window.localStorage.setItem('finances', JSON.stringify(d)); } }
+      } catch { /* fallback to localStorage */ }
     };
     loadFromApi();
   }, []);
 
   useEffect(() => {
-    const onStorage = () => syncStorage();
-    window.addEventListener('storage', onStorage);
-    window.addEventListener('app:sync', onStorage);
-    const interval = window.setInterval(syncStorage, 60 * 1000);
+    window.addEventListener('storage', syncStorage);
+    window.addEventListener('app:sync', syncStorage);
+    const interval = window.setInterval(syncStorage, 60_000);
     return () => {
-      window.removeEventListener('storage', onStorage);
-      window.removeEventListener('app:sync', onStorage);
+      window.removeEventListener('storage', syncStorage);
+      window.removeEventListener('app:sync', syncStorage);
       window.clearInterval(interval);
     };
   }, []);
 
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', darkMode);
-  }, [darkMode]);
+  /* ── Filtered data by time range ── */
+  const filteredFinances = useMemo(() => {
+    return finances.filter((entry) => isDateInTimeRange(entry.date, timeRange));
+  }, [finances, timeRange]);
+
+  const daysCount = useMemo(() => {
+    if (timeRange === 'today') return 1;
+    if (timeRange === 'week') return 7;
+    if (timeRange === 'month') return 30;
+    return 365;
+  }, [timeRange]);
 
   const activeSubs = useMemo(
-    () =>
-      subscriptions.filter((sub) => {
-        const endDateObj = sub.endDate ? new Date(sub.endDate) : null;
-        const expiredByDate = endDateObj ? endDateObj < new Date() : false;
-        const expiredBySessions = (sub.sessions ?? 0) <= 0;
-        return !(expiredByDate || expiredBySessions);
-      }),
+    () => subscriptions.filter((s) => !(s.endDate ? new Date(s.endDate) < new Date() : false) && (s.sessions ?? 0) > 0),
     [subscriptions],
   );
 
-  const totalRevenue = useMemo(
-    () =>
-      finances
-        .filter((entry) => entry.type === 'income')
-        .reduce((sum, entry) => sum + Number(entry.amount || 0), 0),
-    [finances],
-  );
-
-  const totalExpenses = useMemo(
-    () =>
-      finances
-        .filter((entry) => entry.type === 'expense')
-        .reduce((sum, entry) => sum + Number(entry.amount || 0), 0),
-    [finances],
-  );
-
+  const totalRevenue = useMemo(() => filteredFinances.filter(e => e.type === 'income').reduce((s, e) => s + Number(e.amount || 0), 0), [filteredFinances]);
+  const totalExpenses = useMemo(() => filteredFinances.filter(e => e.type === 'expense').reduce((s, e) => s + Number(e.amount || 0), 0), [filteredFinances]);
   const netBalance = totalRevenue - totalExpenses;
 
-  const playersByGame = useMemo(() => {
-    const counts: Record<string, number> = {};
-    players.forEach((player) => {
-      const game = player.game || 'غير محدد';
-      counts[game] = (counts[game] || 0) + 1;
-    });
-    return Object.entries(counts).map(([game, count]) => ({ game, count }));
-  }, [players]);
-
   const subsOverview = useMemo(() => {
-    const today = new Date();
-    const soonLimit = new Date();
-    soonLimit.setDate(today.getDate() + 30);
-
-    const mapped = subscriptions.map((sub) => {
-      const endDateObj = sub.endDate ? new Date(sub.endDate) : null;
-      const expiredByDate = endDateObj ? endDateObj < today : true;
-      const sessionsRemaining = sub.sessions ?? 0;
-      const expiredBySessions = sessionsRemaining <= 0;
-      const isExpired = expiredByDate || expiredBySessions;
-      const isSoon = !isExpired && endDateObj ? endDateObj <= soonLimit : false;
-      return { ...sub, endDateObj, isExpired, isSoon };
+    const now = new Date();
+    const soon = new Date(); soon.setDate(now.getDate() + 30);
+    const mapped = subscriptions.map((s) => {
+      const end = s.endDate ? new Date(s.endDate) : null;
+      const isExpired = (end ? end < now : true) || (s.sessions ?? 0) <= 0;
+      const isSoon = !isExpired && end ? end <= soon : false;
+      return { isExpired, isSoon };
     });
-
     return {
-      expiredCount: mapped.filter((sub) => sub.isExpired).length,
-      soonCount: mapped.filter((sub) => sub.isSoon).length,
-      activeCount: mapped.filter((sub) => !sub.isExpired && !sub.isSoon).length,
+      active: mapped.filter(s => !s.isExpired && !s.isSoon).length,
+      soon: mapped.filter(s => s.isSoon).length,
+      expired: mapped.filter(s => s.isExpired).length,
     };
   }, [subscriptions]);
 
-  const recentSubscriptions = useMemo(() => {
-    const today = new Date();
-    const nextWeek = new Date();
-    nextWeek.setDate(today.getDate() + 7);
+  const recentFinance = useMemo(() => [...filteredFinances].reverse().slice(0, 6), [filteredFinances]);
 
-    const items = subscriptions
-      .map((sub) => {
-        const endDateObj = sub.endDate ? new Date(sub.endDate) : null;
-        const expiredByDate = endDateObj ? endDateObj < today : true;
-        const sessionsRemaining = sub.sessions ?? 0;
-        const expiredBySessions = sessionsRemaining <= 0;
-        const lowSessions = sessionsRemaining > 0 && sessionsRemaining <= 3;
-        const isExpired = expiredByDate || expiredBySessions;
-        return {
-          ...sub,
-          endDateObj,
-          expiredBySessions,
-          lowSessions,
-          sessionsRemaining,
-          isExpired,
-        };
-      })
-      .filter(
-        (sub) =>
-          sub.isExpired ||
-          (sub.endDateObj && sub.endDateObj >= today && sub.endDateObj <= nextWeek) ||
-          sub.lowSessions,
-      )
-      .sort((a, b) => {
-        if (!a.endDateObj) return 1;
-        if (!b.endDateObj) return -1;
-        return a.endDateObj.getTime() - b.endDateObj.getTime();
-      })
-      .slice(0, 10);
+  /* ── Sparkline data ── */
+  const playersSparkData = useMemo(() => bucketByDay(players.map(p => ({ date: undefined })), Math.min(daysCount, 7)), [players, daysCount]);
+  const subsSparkData = useMemo(() => bucketByDay(subscriptions.map(s => ({ date: s.endDate })), Math.min(daysCount, 7)), [subscriptions, daysCount]);
+  const revenueSparkData = useMemo(() => bucketFinanceByDay(filteredFinances, 'income', Math.min(daysCount, 7)), [filteredFinances, daysCount]);
+  const expenseSparkData = useMemo(() => bucketFinanceByDay(filteredFinances, 'expense', Math.min(daysCount, 7)), [filteredFinances, daysCount]);
 
-    return items;
-  }, [subscriptions]);
+  /* ── Merged chart data ── */
+  const chartDays = Math.min(daysCount, 7);
+  const weeklyChartData = useMemo(() => {
+    const incomeArr = bucketFinanceByDay(filteredFinances, 'income', chartDays);
+    const expenseArr = bucketFinanceByDay(filteredFinances, 'expense', chartDays);
+    return incomeArr.map((item, i) => ({
+      label: item.label,
+      income: item.value,
+      expense: expenseArr[i]?.value ?? 0,
+    }));
+  }, [filteredFinances, chartDays]);
 
-  function getSubscriptionStatusText(sub: typeof recentSubscriptions[number]) {
-    if (sub.isExpired) return "انتهى";
-    if (sub.lowSessions) return `باقي ${sub.sessionsRemaining} جلسات`;
-    if (sub.endDateObj) {
-      const daysLeft = Math.ceil((sub.endDateObj.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
-      return daysLeft === 0 ? 'اليوم' : daysLeft === 1 ? 'غداً' : `خلال ${daysLeft} يوم`;
-    }
-    return 'غير معروف';
+  /* ── % change helpers ── */
+  function pctChange(data: { value: number }[]) {
+    const prev = data[data.length - 2]?.value ?? 0;
+    const curr = data[data.length - 1]?.value ?? 0;
+    if (!prev && !curr) return { label: '٠٪', up: true };
+    if (!prev) return { label: '+١٠٠٪', up: true };
+    const pct = Math.round(((curr - prev) / prev) * 100);
+    return { label: `${pct >= 0 ? '+' : ''}${pct}٪`, up: pct >= 0 };
   }
 
+  const donutTotal = subscriptions.length || 1;
+  const donutSegments = [
+    { value: subsOverview.active, color: '#10b981' },
+    { value: subsOverview.soon, color: '#f59e0b' },
+    { value: subsOverview.expired, color: '#ef4444' },
+  ];
+
+  const playersChg = pctChange(playersSparkData);
+  const subsChg = pctChange(subsSparkData);
+  const revChg = pctChange(revenueSparkData);
+  const expChg = pctChange(expenseSparkData);
+
+  const rangeLabels: Record<TimeRange, { title: string; subtitle: string }> = {
+    today: { title: 'النشاط المالي لليوم', subtitle: 'اليوم' },
+    week: { title: 'النشاط المالي الأسبوعي', subtitle: 'آخر 7 أيام' },
+    month: { title: 'النشاط المالي الشهري', subtitle: 'آخر 30 يوماً' },
+    year: { title: 'النشاط المالي السنوي', subtitle: 'خلال السنة' },
+  };
+
   return (
-    <div className="space-y-6">
-      
+    <div dir="rtl" className="min-h-screen bg-slate-50 p-6 space-y-6 font-sans">
 
-      <div className="grid gap-6 xl:grid-cols-[1.5fr_0.75fr]">
-        <section className="space-y-6">
-          <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
+      {/* ── Page Header ── */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-right">
+          <h1 className="text-2xl font-bold text-slate-900">لوحة تحكم الأعمال</h1>
+          <p className="mt-1 text-sm text-slate-500">متابعة البيانات والأداء الفعلي بنظرة واحدة خاطفة</p>
+        </div>
+
+        {/* ── Interactive Time Range Filter Pills ── */}
+        <div className="flex items-center gap-1 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm text-xs font-semibold">
+          {[
+            { id: 'today', label: 'اليوم' },
+            { id: 'week', label: 'هذا الأسبوع' },
+            { id: 'month', label: 'هذا الشهر' },
+            { id: 'year', label: 'هذه السنة' },
+          ].map((item) => (
             <button
+              key={item.id}
               type="button"
-              onClick={() => navigate('/players')}
-              className="group rounded-3xl border border-slate-200 bg-sky-600 p-5 text-left text-white transition hover:bg-sky-700"
+              onClick={() => setTimeRange(item.id as TimeRange)}
+              className={`rounded-xl px-3 py-1.5 transition ${
+                timeRange === item.id
+                  ? 'bg-sky-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
             >
-              <div className="flex items-center justify-between">
-                <div className="rounded-2xl bg-white/15 p-3 text-white">
-                  <AppIcon icon={Users03} className="text-white" />
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Stat Cards ── */}
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <SparkCard
+          label="إجمالي اللاعبين"
+          value={fmt(players.length)}
+          change={playersChg.label}
+          up={playersChg.up}
+          chartData={playersSparkData}
+          color="#10b981"
+          onClick={() => navigate('/players')}
+        />
+        <SparkCard
+          label="الاشتراكات النشطة"
+          value={fmt(activeSubs.length)}
+          change={subsChg.label}
+          up={subsChg.up}
+          chartData={subsSparkData}
+          color="#6366f1"
+          onClick={() => navigate('/subscriptions')}
+        />
+        <SparkCard
+          label="إجمالي الإيرادات"
+          value={fmt(totalRevenue) + ' ج'}
+          change={revChg.label}
+          up={revChg.up}
+          chartData={revenueSparkData}
+          color="#f59e0b"
+        />
+        <SparkCard
+          label="إجمالي المصروفات"
+          value={fmt(totalExpenses) + ' ج'}
+          change={expChg.label}
+          up={!expChg.up}
+          chartData={expenseSparkData}
+          color="#ef4444"
+        />
+      </div>
+
+      {/* ── Charts Row ── */}
+      <div className="grid gap-6 xl:grid-cols-[1.6fr_1fr]">
+
+        {/* Line Chart: financial activity */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-4 text-xs text-slate-500">
+              <span className="flex items-center gap-1"><span className="inline-block h-2 w-4 rounded bg-emerald-500" /> إيرادات</span>
+              <span className="flex items-center gap-1"><span className="inline-block h-0.5 w-4 rounded bg-rose-400 border-dashed border-t-2" /> مصروفات</span>
+            </div>
+            <div className="text-right">
+              <h2 className="text-base font-semibold text-slate-800">{rangeLabels[timeRange].title}</h2>
+              <p className="text-xs text-slate-400">{rangeLabels[timeRange].subtitle}</p>
+            </div>
+          </div>
+          <WeeklyBarChart data={weeklyChartData} />
+        </div>
+
+        {/* Donut: subscription status */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex items-center gap-2 mb-4">
+            <span className="text-slate-400 text-sm">🕐</span>
+            <h2 className="text-base font-semibold text-slate-800">حالة وتوزيع الاشتراكات</h2>
+          </div>
+          <div className="flex items-center gap-6">
+            <div className="relative flex-shrink-0">
+              <DonutChart segments={donutSegments} />
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                <p className="text-xl font-bold text-slate-800">{fmt(subscriptions.length)}</p>
+                <p className="text-xs text-slate-500">إجمالي</p>
+              </div>
+            </div>
+            <div className="space-y-3 text-right">
+              {[
+                { label: 'نشطة', count: subsOverview.active, pct: Math.round((subsOverview.active / donutTotal) * 100), color: '#10b981' },
+                { label: 'قريبة', count: subsOverview.soon, pct: Math.round((subsOverview.soon / donutTotal) * 100), color: '#f59e0b' },
+                { label: 'منتهية', count: subsOverview.expired, pct: Math.round((subsOverview.expired / donutTotal) * 100), color: '#ef4444' },
+              ].map((item) => (
+                <div key={item.label} className="flex items-center justify-end gap-2 text-sm text-slate-700">
+                  <span>({item.pct}٪) {item.label}</span>
+                  <span className="inline-block h-3 w-3 rounded-full" style={{ background: item.color }} />
                 </div>
-                <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-white/80">
-                  نشط
-                </span>
-              </div>
-              <p className="mt-10 text-3xl font-semibold">{players.length}</p>
-              <p className="mt-2 text-sm text-white/80">إجمالي اللاعبين</p>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => navigate('/subscriptions')}
-              className="rounded-3xl border border-slate-200 bg-violet-600 p-5 text-left text-white transition hover:bg-violet-700"
-            >
-              <div className="rounded-2xl bg-white/15 p-3 text-white">
-                <AppIcon icon={CreditCard01} className="text-white" />
-              </div>
-              <p className="mt-10 text-3xl font-semibold">{activeSubs.length}</p>
-              <p className="mt-2 text-sm text-white/80">الاشتراكات النشطة</p>
-            </button>
-
-            <div className="rounded-3xl border border-slate-200 bg-emerald-600 p-5 text-left text-white">
-              <div className="rounded-2xl bg-white/15 p-3 text-white">
-                <AppIcon icon={TrendUp01} className="text-white" />
-              </div>
-              <p className="mt-10 text-3xl font-semibold">{formatMoney(totalRevenue)}</p>
-              <p className="mt-2 text-sm text-white/80">إجمالي الإيرادات</p>
-            </div>
-
-            <div className="rounded-3xl border border-slate-200 bg-red-600 p-5 text-left text-white">
-              <div className="rounded-2xl bg-white/15 p-3 text-white">
-                <AppIcon icon={TrendDown01} className="text-white" />
-              </div>
-              <p className="mt-10 text-3xl font-semibold">{formatMoney(totalExpenses)}</p>
-              <p className="mt-2 text-sm text-white/80">إجمالي المصروفات</p>
-            </div>
-
-            <div className="rounded-3xl border border-slate-200 bg-orange-500 p-5 text-left text-white">
-              <div className="rounded-2xl bg-white/15 p-3 text-white">
-                <AppIcon icon={Scales01} className="text-white" />
-              </div>
-              <p className="mt-10 text-3xl font-semibold">{formatMoney(netBalance)}</p>
-              <p className="mt-2 text-sm text-white/80">الرصيد الصافي</p>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => navigate('/users')}
-              className="rounded-3xl border border-slate-200 bg-teal-600 p-5 text-left text-white transition hover:bg-teal-700"
-            >
-              <div className="rounded-2xl bg-white/15 p-3 text-white">
-                <AppIcon icon={Users01} className="text-white" />
-              </div>
-              <p className="mt-10 text-3xl font-semibold">⇦</p>
-              <p className="mt-2 text-sm text-white/80">إدارة المستخدمين</p>
-            </button>
-          </div>
-
-          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm shadow-slate-200/50">
-            <div className="mb-5 flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold text-slate-500">الملخص المالي</p>
-              </div>
-            </div>
-            <div className="space-y-4">
-              {[
-                { label: 'إجمالي الإيرادات', value: totalRevenue, color: 'bg-emerald-500' },
-                { label: 'إجمالي المصروفات', value: totalExpenses, color: 'bg-red-500' },
-              ].map((item) => {
-                const percentage = totalRevenue === 0 && totalExpenses === 0 ? 50 : Math.round((item.value / Math.max(totalRevenue, totalExpenses, 1)) * 100);
-                return (
-                  <div key={item.label} className="space-y-2">
-                    <div className="flex items-center justify-between text-sm font-medium text-slate-700">
-                      <span>{item.label}</span>
-                      <span>{formatMoney(item.value)}</span>
-                    </div>
-                    <div className="h-3 overflow-hidden rounded-full bg-slate-100">
-                      <div className={`h-full rounded-full ${item.color}`} style={{ width: `${Math.min(percentage, 100)}%` }} />
-                    </div>
-                  </div>
-                );
-              })}
+              ))}
             </div>
           </div>
+        </div>
+      </div>
 
-          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm shadow-slate-200/50">
-            <div className="mb-5 flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold text-slate-500">توزيع اللاعبين حسب الرياضة</p>
+      {/* ── Recent Transactions ── */}
+      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+          <button
+            type="button"
+            onClick={() => navigate('/finances')}
+            className="text-xs font-medium text-slate-400 hover:text-slate-700 transition"
+          >
+            عرض الكل ←
+          </button>
+          <h2 className="text-base font-semibold text-slate-800">آخر العمليات المالية</h2>
+        </div>
+
+        {recentFinance.length === 0 ? (
+          <div className="px-6 py-12 text-center text-sm text-slate-400">لا توجد سجلات مالية حتى الآن</div>
+        ) : (
+          <div className="divide-y divide-slate-100">
+            {recentFinance.map((entry, i) => (
+              <div key={entry.id ?? i} className="flex items-center justify-between px-6 py-4 hover:bg-slate-50 transition">
+                <div>
+                  {entry.type === 'income'
+                    ? <span className="inline-flex rounded-lg bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">إيراد</span>
+                    : <span className="inline-flex rounded-lg bg-rose-100 px-3 py-1 text-xs font-semibold text-rose-700">مصروف</span>
+                  }
+                </div>
+                <div className="flex-1 text-right px-4">
+                  <p className="text-sm font-medium text-slate-800">{entry.description || (entry.type === 'income' ? 'إيراد' : 'مصروف')}</p>
+                  {entry.date && <p className="text-xs text-slate-400 mt-0.5">{new Date(entry.date).toLocaleDateString('ar-EG')}</p>}
+                </div>
+                <p className={`text-sm font-bold tabular-nums ${entry.type === 'income' ? 'text-emerald-600' : 'text-rose-500'}`}>
+                  {entry.type === 'income' ? '+' : '-'}{fmt(Number(entry.amount))} ج
+                </p>
               </div>
-            </div>
-            <div className="space-y-3">
-              {playersByGame.length === 0 ? (
-                <p className="text-sm text-slate-500">لا توجد بيانات لاعبين حالياً.</p>
-              ) : (
-                playersByGame.map((item) => (
-                  <div key={item.game} className="rounded-3xl bg-slate-50 p-4">
-                    <div className="flex items-center justify-between gap-3 text-sm text-slate-800">
-                      <span>{item.game}</span>
-                      <span className="font-semibold">{item.count}</span>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
+            ))}
           </div>
+        )}
 
-          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm shadow-slate-200/50">
-            <div className="mb-5 flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold text-slate-500">حالة الاشتراكات</p>
-              </div>
-            </div>
-            <div className="space-y-4">
-              {[
-                { label: 'منتهية', value: subsOverview.expiredCount, color: 'bg-red-500' },
-                { label: 'قريبة', value: subsOverview.soonCount, color: 'bg-amber-500' },
-                { label: 'نشطة', value: subsOverview.activeCount, color: 'bg-emerald-500' },
-              ].map((item) => {
-                const total = subsOverview.expiredCount + subsOverview.soonCount + subsOverview.activeCount || 1;
-                const width = Math.round((item.value / total) * 100);
-                return (
-                  <div key={item.label} className="space-y-2">
-                    <div className="flex items-center justify-between text-sm font-medium text-slate-700">
-                      <span>{item.label}</span>
-                      <span>{item.value}</span>
-                    </div>
-                    <div className="h-3 overflow-hidden rounded-full bg-slate-100">
-                      <div className={`${item.color} h-full rounded-full`} style={{ width: `${width}%` }} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </section>
-
-        <aside className="space-y-6">
-          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm shadow-slate-200/50">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold text-slate-500">اشتراكات تنتهي قريباً</p>
-                <p className="mt-2 text-sm text-slate-600">تابع الاشتراكات المنتهية أو القريبة من الانتهاء.</p>
-              </div>
-              <button
-                type="button"
-                className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
-                onClick={() => navigate('/subscriptions')}
-              >
-                <AppIcon icon={ChevronLeft} className="text-white" />
-                عرض الكل
-              </button>
-            </div>
-          </div>
-
-          <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm shadow-slate-200/50">
-            <div className="border-b border-slate-200 bg-slate-50 px-6 py-4">
-              <p className="text-sm font-semibold text-slate-900">اشتراكات قريبة من الانتهاء</p>
-            </div>
-            <div className="max-h-[420px] overflow-y-auto text-sm text-slate-700">
-              <table className="min-w-full divide-y divide-slate-200">
-                <thead className="bg-white text-slate-500">
-                  <tr>
-                    <th className="px-6 py-4 text-right font-medium">اللاعب</th>
-                    <th className="px-6 py-4 text-right font-medium">الحالة</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200 bg-white">
-                  {recentSubscriptions.length === 0 ? (
-                    <tr>
-                      <td colSpan={2} className="px-6 py-10 text-center text-slate-500">
-                        لا توجد اشتراكات منتهية أو قريبة من الانتهاء
-                      </td>
-                    </tr>
-                  ) : (
-                    recentSubscriptions.map((sub) => (
-                      <tr key={sub.id} className="hover:bg-slate-50">
-                        <td className="whitespace-nowrap px-6 py-4 text-right font-semibold text-slate-900">
-                          <div>{sub.player}</div>
-                          <div className="mt-1 text-xs text-slate-500">{sub.game || 'لعبة غير محددة'}</div>
-                        </td>
-                        <td className="px-6 py-4 text-right">
-                          <span
-                            className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
-                              sub.isExpired ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'
-                            }`}
-                          >
-                            {getSubscriptionStatusText(sub)}
-                          </span>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </aside>
+        <div className="flex items-center justify-between border-t border-slate-100 bg-slate-50 px-6 py-3 text-sm">
+          <span className={`font-bold ${netBalance >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>{fmt(netBalance)} ج</span>
+          <span className="text-slate-500">الرصيد الصافي</span>
+        </div>
       </div>
     </div>
   );

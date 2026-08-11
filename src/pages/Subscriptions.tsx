@@ -5,7 +5,6 @@ import {
   CreditCard01,
   Plus,
   SearchSm,
-  Wallet01,
   Calendar,
   Clock,
   MessageChatCircle,
@@ -1001,6 +1000,18 @@ export default function Subscriptions() {
             <option value="cancelled">ملغي</option>
           </select>
 
+          {/* Branch filter */}
+          <select
+            value={branchFilter}
+            onChange={(event) => setBranchFilter(event.target.value)}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-700 outline-none"
+          >
+            <option value="all">كل الفروع</option>
+            {uniqueBranchOptions.map((name) => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
+
           {/* Payment filter */}
           <select
             value={paymentFilter}
@@ -1148,6 +1159,16 @@ export default function Subscriptions() {
                         className="flex-1 rounded-lg bg-emerald-600 py-1.5 font-semibold text-white hover:bg-emerald-700"
                       >
                         تجديد
+                      </button>
+                    )}
+                    {canEditSubs && !isCancelled && (
+                      <button
+                        type="button"
+                        onClick={() => refundSubscription(sub)}
+                        title="إلغاء واسترداد"
+                        className="flex-1 rounded-lg bg-rose-600 py-1.5 font-semibold text-white hover:bg-rose-700"
+                      >
+                        إلغاء
                       </button>
                     )}
                     <button

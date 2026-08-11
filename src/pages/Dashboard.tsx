@@ -44,15 +44,6 @@ function fmt(n: number) {
   return n.toLocaleString('ar-EG');
 }
 
-function todayStr() {
-  return new Date().toLocaleDateString('ar-EG', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
-}
-
 /**
  * Bucket a list of {date} items into the last N days.
  * Returns an array like: [{ label: "قبل 6 أيام", value: 3 }, ...]
@@ -358,7 +349,7 @@ export default function Dashboard() {
   const recentFinance = useMemo(() => [...filteredFinances].reverse().slice(0, 6), [filteredFinances]);
 
   /* ── Sparkline data ── */
-  const playersSparkData = useMemo(() => bucketByDay(players.map(p => ({ date: undefined })), Math.min(daysCount, 7)), [players, daysCount]);
+  const playersSparkData = useMemo(() => bucketByDay(players.map(() => ({ date: undefined })), Math.min(daysCount, 7)), [players, daysCount]);
   const subsSparkData = useMemo(() => bucketByDay(subscriptions.map(s => ({ date: s.endDate })), Math.min(daysCount, 7)), [subscriptions, daysCount]);
   const revenueSparkData = useMemo(() => bucketFinanceByDay(filteredFinances, 'income', Math.min(daysCount, 7)), [filteredFinances, daysCount]);
   const expenseSparkData = useMemo(() => bucketFinanceByDay(filteredFinances, 'expense', Math.min(daysCount, 7)), [filteredFinances, daysCount]);

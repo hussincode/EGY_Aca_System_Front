@@ -13,7 +13,7 @@ import {
   Tooltip,
   type TooltipProps,
 } from 'recharts';
-import type { ReactElement, ReactNode } from 'react';
+import type { ReactElement } from 'react';
 
 /* ── Types ──────────────────────────────────────────────────── */
 export type ChartConfig = Record<
@@ -73,7 +73,7 @@ export function ChartContainer({
 
 /* ── ChartTooltip ────────────────────────────────────────────── */
 // Re-exports Recharts Tooltip with sane defaults
-export function ChartTooltip(props: TooltipProps<number, string>) {
+export function ChartTooltip(props: TooltipProps<any, any>) {
   return (
     <Tooltip
       {...props}

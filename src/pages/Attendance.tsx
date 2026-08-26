@@ -44,6 +44,8 @@ type SubscriptionRecord = {
   status?: string;
   phone?: string;
   sessions?: number;
+  playerCode?: string;
+  invoiceNumber?: string;
 };
 
 type DisplayItem = {
@@ -186,6 +188,15 @@ export default function Attendance() {
   const [scannedCodeInput, setScannedCodeInput] = useState('');
   const [isCameraActive, setIsCameraActive] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const scanInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Auto-focus barcode input when modal opens
+  useEffect(() => {
+    if (isScannerModalOpen) {
+      const timer = setTimeout(() => scanInputRef.current?.focus(), 150);
+      return () => clearTimeout(timer);
+    }
+  }, [isScannerModalOpen]);
 
   // Load from API on mount
   useEffect(() => {
@@ -256,7 +267,9 @@ export default function Attendance() {
 
   const startCamera = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+      });
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
@@ -281,6 +294,62 @@ export default function Attendance() {
       stopCamera();
     };
   }, []);
+
+  // Continuous Camera Frame Barcode & QR Code Scanner
+  useEffect(() => {
+    let animationFrameId: number;
+    let isDetecting = false;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let barcodeDetector: any = null;
+
+    if (isCameraActive && 'BarcodeDetector' in window) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        barcodeDetector = new (window as any).BarcodeDetector({
+          formats: ['qr_code', 'code_128', 'code_39', 'ean_13', 'ean_8', 'data_matrix'],
+        });
+      } catch (err) {
+        console.warn('BarcodeDetector error:', err);
+      }
+    }
+
+    const detectFrame = async () => {
+      if (!isCameraActive || !videoRef.current) return;
+
+      if (videoRef.current.readyState >= 2 && !isDetecting) {
+        isDetecting = true;
+        try {
+          if (barcodeDetector) {
+            const barcodes = await barcodeDetector.detect(videoRef.current);
+            if (barcodes && barcodes.length > 0) {
+              const rawValue = barcodes[0].rawValue;
+              if (rawValue && rawValue.trim()) {
+                processScanCode(rawValue);
+                stopCamera();
+                return;
+              }
+            }
+          }
+        } catch {
+          // ignore frame detection errors
+        } finally {
+          isDetecting = false;
+        }
+      }
+
+      if (isCameraActive) {
+        animationFrameId = requestAnimationFrame(detectFrame);
+      }
+    };
+
+    if (isCameraActive) {
+      animationFrameId = requestAnimationFrame(detectFrame);
+    }
+
+    return () => {
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+    };
+  }, [isCameraActive, subscriptions, players, records]);
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToast({ message, type });
@@ -530,12 +599,15 @@ export default function Attendance() {
     let playerId = '';
     let playerSerial = raw;
 
-    if (raw.startsWith('{') && raw.endsWith('}')) {
+    if (raw.includes('{') && raw.includes('}')) {
       try {
-        const obj = JSON.parse(raw);
-        subId = obj.subId || '';
-        playerId = obj.playerId || '';
-        playerSerial = obj.code || obj.playerSerial || playerSerial;
+        const jsonStart = raw.indexOf('{');
+        const jsonEnd = raw.lastIndexOf('}');
+        const jsonStr = raw.substring(jsonStart, jsonEnd + 1);
+        const obj = JSON.parse(jsonStr);
+        subId = String(obj.subId || obj.id || '');
+        playerId = String(obj.playerId || obj.player_id || '');
+        playerSerial = String(obj.code || obj.playerSerial || obj.playerCode || obj.player || playerSerial);
       } catch {}
     } else if (raw.startsWith('SUB:')) {
       const parts = raw.split(':');
@@ -544,17 +616,28 @@ export default function Attendance() {
       if (parts[3]) playerSerial = parts[3];
     }
 
+    const cleanRaw = raw.toLowerCase();
+    const cleanSerial = playerSerial.toLowerCase();
+
     let matchedSub = subscriptions.find(
-      (s) => s.id === subId || (playerId && s.playerId === playerId)
+      (s) =>
+        (subId && s.id === subId) ||
+        (playerId && s.playerId === playerId) ||
+        s.id.toLowerCase() === cleanRaw ||
+        (s.invoiceNumber && s.invoiceNumber.toLowerCase() === cleanRaw) ||
+        (s.playerCode && s.playerCode.toLowerCase() === cleanSerial)
     );
 
     let matchedPlayer = players.find(
       (p) =>
         (playerId && p.id === playerId) ||
         (matchedSub && (p.id === matchedSub.playerId || p.name === matchedSub.player)) ||
-        p.playerSerial === playerSerial ||
-        p.playerBarcodeValue === playerSerial ||
-        p.id === playerSerial
+        p.id.toLowerCase() === cleanRaw ||
+        p.id.toLowerCase() === cleanSerial ||
+        (p.playerSerial && p.playerSerial.toLowerCase() === cleanSerial) ||
+        (p.playerBarcodeValue && p.playerBarcodeValue.toLowerCase() === cleanSerial) ||
+        p.name.toLowerCase() === cleanSerial ||
+        (p.phone && p.phone === cleanSerial)
     );
 
     if (!matchedSub && matchedPlayer) {
@@ -1325,6 +1408,7 @@ export default function Attendance() {
               </label>
               <div className="flex gap-2">
                 <input
+                  ref={scanInputRef}
                   type="text"
                   autoFocus
                   value={scannedCodeInput}
@@ -1342,8 +1426,15 @@ export default function Attendance() {
             </form>
 
             {/* Video Feed Component */}
-            <div className="rounded-xl border border-slate-200 bg-slate-950 p-3 text-center overflow-hidden">
-              <video ref={videoRef} className="w-full max-h-52 rounded-lg object-cover mx-auto bg-slate-900" />
+            <div className="relative rounded-xl border border-slate-200 bg-slate-950 p-3 text-center overflow-hidden">
+              <video ref={videoRef} playsInline className="w-full max-h-52 rounded-lg object-cover mx-auto bg-slate-900" />
+              {isCameraActive && (
+                <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                  <div className="w-48 h-32 border-2 border-emerald-400/80 rounded-lg animate-pulse shadow-[0_0_15px_rgba(52,211,153,0.5)] flex items-center justify-center">
+                    <span className="text-[10px] text-emerald-400 font-bold bg-slate-950/80 px-2 py-0.5 rounded">جاري مسح الـ QR تلقائياً...</span>
+                  </div>
+                </div>
+              )}
               <div className="mt-2 flex items-center justify-center gap-3">
                 {!isCameraActive ? (
                   <button

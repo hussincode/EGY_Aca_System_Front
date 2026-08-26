@@ -1,6 +1,6 @@
 import { BarChartSquare02, Folder, HomeLine, MessageChatCircle, PieChart03, Rows01, Settings01, Users01 } from "@untitledui/icons";
 import { NavLink, useNavigate } from "react-router-dom";
-import { type Dispatch, type SetStateAction, useState } from "react";
+import { type Dispatch, type SetStateAction, useEffect, useState } from "react";
 import logo from "@/assets/logo.jpg";
 import AppIcon from "@/components/AppIcon";
 import { useAuth } from "@/contexts/AuthContext";
@@ -61,6 +61,33 @@ const Sidebar = ({ isOpen, setIsOpen }: SidebarProps) => {
 
     const mobileClose = () => setIsOpen(false);
 
+    const [generalSettings, setGeneralSettings] = useState<{ sidebarLogo?: string; siteLogo?: string; academyName?: string; systemName?: string }>(() => {
+        try {
+            const raw = window.localStorage.getItem('system_settings_general');
+            return raw ? JSON.parse(raw) : {};
+        } catch {
+            return {};
+        }
+    });
+
+    useEffect(() => {
+        const handleSync = () => {
+            try {
+                const raw = window.localStorage.getItem('system_settings_general');
+                if (raw) setGeneralSettings(JSON.parse(raw));
+            } catch {}
+        };
+        window.addEventListener('storage', handleSync);
+        window.addEventListener('app:sync', handleSync as EventListener);
+        return () => {
+            window.removeEventListener('storage', handleSync);
+            window.removeEventListener('app:sync', handleSync as EventListener);
+        };
+    }, []);
+
+    const sidebarLogoSrc = generalSettings.sidebarLogo || generalSettings.siteLogo || logo;
+    const systemDisplayName = generalSettings.academyName || generalSettings.systemName || "ايجي سبورتنج كلوب";
+
     // Filter sections so only permitted pages appear
     const visibleSections = ALL_SECTIONS
         .map((section) => ({
@@ -99,10 +126,10 @@ const Sidebar = ({ isOpen, setIsOpen }: SidebarProps) => {
                 {/* Logo + Academy name */}
                 <div className="mb-10 transition-all duration-300">
                     <div className={`flex items-center gap-3 ${expanded ? "justify-start" : "justify-center"}`}>
-                        <img src={logo} alt="Academy Logo" className="h-10 w-10 rounded-xl object-cover" />
-                        <div className={`${expanded ? "block" : "hidden"}`}>
-                            <h2 className="text-2xl font-semibold">ايجي سبورتنج كلوب</h2>
-                            <p className="mt-1 text-sm text-slate-400">نظام الإدارة</p>
+                        <img src={sidebarLogoSrc} alt="Academy Logo" className="h-10 w-10 rounded-xl object-cover border border-slate-800 bg-slate-900" />
+                        <div className={`${expanded ? "block" : "hidden"} min-w-0`}>
+                            <h2 className="text-xl font-bold text-white truncate max-w-[170px]">{systemDisplayName}</h2>
+                            <p className="mt-0.5 text-xs text-slate-400">نظام الإدارة</p>
                         </div>
                     </div>
                 </div>

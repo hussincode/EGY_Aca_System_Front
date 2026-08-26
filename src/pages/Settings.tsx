@@ -3,7 +3,7 @@ import { SearchSm, Settings01 } from '@untitledui/icons';
 import AppIcon from '@/components/AppIcon';
 import { API_BASE_URL } from '@/api';
 
-type TabKey = 'general' | 'financial' | 'invoices' | 'security' | 'landing' | 'backup' | 'audit';
+type TabKey = 'general' | 'security' | 'landing' | 'backup';
 
 type ToastType = 'success' | 'error' | 'warning';
 
@@ -11,20 +11,9 @@ type GeneralSettings = {
   academyName: string;
   currency: string;
   language: string;
-  whatsappNumber: string;
-  darkMode: boolean;
-};
-
-type FinancialSettings = {
-  defaultPrice: string;
-  taxRate: string;
-};
-
-type InvoiceSettings = {
-  title: string;
-  logo: string;
-  footer: string;
-  contact: string;
+  notificationEmail: string;
+  siteLogo: string;
+  sidebarLogo: string;
 };
 
 type LandingHeroSettings = {
@@ -79,18 +68,16 @@ type LandingSportItem = {
 };
 
 type AuditLog = {
+  id?: string;
   createdAt: string;
   userName: string;
   userRole: string;
   action: string;
   section: string;
   description: string;
-};
-
-type AuditResponse = {
-  logs?: AuditLog[];
-  page?: number;
-  pages?: number;
+  amount?: number;
+  type?: string;
+  relatedTo?: string;
 };
 
 function readJson<T>(key: string, fallback: T): T {
@@ -123,6 +110,8 @@ function writeJson<T>(key: string, value: T) {
   if (typeof window === 'undefined') return;
   window.localStorage.setItem(key, JSON.stringify(value));
   broadcastLandingChange(key, value);
+  window.dispatchEvent(new Event('storage'));
+  window.dispatchEvent(new CustomEvent('app:sync', { detail: { key, value } }));
 }
 
 function writeString(key: string, value: string) {
@@ -133,6 +122,8 @@ function writeString(key: string, value: string) {
     window.localStorage.setItem(key, value);
   }
   broadcastLandingChange(key, value);
+  window.dispatchEvent(new Event('storage'));
+  window.dispatchEvent(new CustomEvent('app:sync', { detail: { key, value } }));
 }
 
 function readString(key: string) {
@@ -143,29 +134,42 @@ function readString(key: string) {
 export default function Settings() {
   const [activeTab, setActiveTab] = useState<TabKey>('general');
   const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null);
-  const [isAdmin] = useState(() => {
-    const user = readJson<{ roleKey?: string; role?: string }>('loggedInUser', {});
-    return (user.roleKey || user.role || '').toLowerCase() === 'admin';
-  });
 
-  const [general, setGeneral] = useState<GeneralSettings>(() => readJson('system_settings_general', {
-    academyName: '',
-    currency: 'EGP',
-    language: 'ar',
-    whatsappNumber: '',
-    darkMode: false,
-  }));
-  const [financial, setFinancial] = useState<FinancialSettings>(() => readJson('system_settings_financial', { defaultPrice: '', taxRate: '' }));
-  const [invoice, setInvoice] = useState<InvoiceSettings>(() => readJson('system_settings_invoice', { title: '', logo: '', footer: '', contact: '' }));
+  const loggedUser = useMemo(() => {
+    return readJson<{ id?: string; name?: string; role?: string; email?: string }>('loggedInUser', {
+      name: 'مدير النظام',
+      role: 'admin',
+      email: 'admin@egy-academy.com',
+    });
+  }, []);
+
+  const isAdmin = useMemo(() => {
+    return (loggedUser.role || '').toLowerCase() === 'admin' || (loggedUser.role || '').toLowerCase() === 'manager';
+  }, [loggedUser]);
+
+  const [general, setGeneral] = useState<GeneralSettings>(() =>
+    readJson('system_settings_general', {
+      academyName: 'ايجي سبورتنج كلوب',
+      currency: 'EGP',
+      language: 'ar',
+      notificationEmail: 'notifications@egy-academy.com',
+      siteLogo: '',
+      sidebarLogo: '',
+    })
+  );
+
   const [passwords, setPasswords] = useState({ newPassword: '', confirmPassword: '' });
 
-  const [heroSettings, setHeroSettings] = useState<LandingHeroSettings>(() => readJson('landing_hero_settings', {
-    title: '',
-    subtitle: '',
-    videoUrl: '',
-    bgType: 'video',
-    imageUrl: '',
-  }));
+  // Landing Page Settings States
+  const [heroSettings, setHeroSettings] = useState<LandingHeroSettings>(() =>
+    readJson('landing_hero_settings', {
+      title: '',
+      subtitle: '',
+      videoUrl: '',
+      bgType: 'video',
+      imageUrl: '',
+    })
+  );
   const [heroImagePreview, setHeroImagePreview] = useState(() => readString('landing_hero_image'));
   const [ceoPhotoUrl, setCeoPhotoUrl] = useState(() => readString('landing_ceo_photo'));
   const [ceoPhotoPreview, setCeoPhotoPreview] = useState(() => readString('landing_ceo_photo'));
@@ -192,7 +196,15 @@ export default function Settings() {
   const [sportImagePreview, setSportImagePreview] = useState('');
   const [landingSports, setLandingSports] = useState<LandingSportItem[]>(() => readJson('landing_sports', []));
   const [sectionTitle, setSectionTitle] = useState(() => readString('landing_sports_title'));
-  const [branchNameSetting, setBranchNameSetting] = useState('');
+
+  // Audit Logs Filtration States
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [auditSearch, setAuditSearch] = useState('');
+  const [auditUserFilter, setAuditUserFilter] = useState('all');
+  const [auditTypeFilter, setAuditTypeFilter] = useState('all');
+  const [auditPage, setAuditPage] = useState(1);
+  const [auditTotalPages, setAuditTotalPages] = useState(1);
+  const [auditLoading, setAuditLoading] = useState(false);
 
   useEffect(() => {
     writeJson('landing_hero_settings', heroSettings);
@@ -202,51 +214,50 @@ export default function Settings() {
     writeJson('system_settings_general', general);
   }, [general]);
 
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
-  const [auditSearch, setAuditSearch] = useState('');
-  const [auditPage, setAuditPage] = useState(1);
-  const [auditTotalPages, setAuditTotalPages] = useState(1);
-  const [auditLoading, setAuditLoading] = useState(false);
-
   useEffect(() => {
     if (!toast) return;
-    const timer = window.setTimeout(() => setToast(null), 2600);
+    const timer = window.setTimeout(() => setToast(null), 2800);
     return () => window.clearTimeout(timer);
   }, [toast]);
-
-  useEffect(() => {
-    if (general.darkMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  }, [general.darkMode]);
 
   const showToast = (message: string, type: ToastType = 'success') => setToast({ message, type });
 
   const saveGeneralSettings = () => {
     writeJson('system_settings_general', general);
-    if (general.darkMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-    showToast('تم حفظ الإعدادات العامة', 'success');
+    showToast('تم حفظ إعدادات النظام وتحديث البيانات بنجاح', 'success');
   };
 
-  const saveFinancialSettings = () => {
-    writeJson('system_settings_financial', financial);
-    showToast('تم حفظ الإعدادات المالية', 'success');
+  const uploadSiteLogo = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = e.target?.result;
+      if (typeof result === 'string') {
+        setGeneral((prev) => ({ ...prev, siteLogo: result }));
+        showToast('تم رفع لوجو الموقع بنجاح', 'success');
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
-  const saveInvoiceSettings = () => {
-    writeJson('system_settings_invoice', invoice);
-    showToast('تم حفظ إعدادات الفواتير', 'success');
+  const uploadSidebarLogo = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = e.target?.result;
+      if (typeof result === 'string') {
+        setGeneral((prev) => ({ ...prev, sidebarLogo: result }));
+        showToast('تم رفع صورة السايدبار بنجاح وتطبيقها مباشرة', 'success');
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   const changeUserPassword = async () => {
     if (passwords.newPassword !== passwords.confirmPassword) {
-      showToast('كلمة المرور غير متطابقة', 'error');
+      showToast('كلمتا المرور غير متطابقتين', 'error');
       return;
     }
     if (passwords.newPassword.length < 6) {
@@ -254,25 +265,17 @@ export default function Settings() {
       return;
     }
 
-    const user = readJson<{ id?: string }>('loggedInUser', {});
-    if (!user?.id) {
-      showToast('يجب تسجيل الدخول أولاً', 'error');
-      return;
-    }
-
     try {
       const token = window.api?.getToken?.();
-      if (token) {
-        await window.api?.updateUser?.(user.id, { password: passwords.newPassword });
+      if (token && loggedUser?.id) {
+        await window.api?.updateUser?.(loggedUser.id, { password: passwords.newPassword });
       } else {
         const users = readJson<Array<{ id: string; password?: string }>>('users', []);
-        const index = users.findIndex((item) => item.id === user.id);
-        if (index === -1) {
-          showToast('لا يمكن تغيير كلمة مرور الأدمن الافتراضي المحلي', 'warning');
-          return;
+        const index = users.findIndex((item) => item.id === loggedUser.id);
+        if (index !== -1) {
+          users[index].password = passwords.newPassword;
+          writeJson('users', users);
         }
-        users[index].password = passwords.newPassword;
-        writeJson('users', users);
       }
 
       setPasswords({ newPassword: '', confirmPassword: '' });
@@ -282,65 +285,247 @@ export default function Settings() {
     }
   };
 
-  const addSport = () => {
-    if (!sportName.trim()) return;
-    const games = readJson<Array<{ id: string; name: string; icon: string; playersCount: number }>>('games', []);
-    games.push({ id: `game_${Date.now()}`, name: sportName.trim(), icon: 'fa-solid fa-trophy', playersCount: 0 });
-    writeJson('games', games);
-    setSportName('');
-    showToast('تم إضافة الرياضة', 'success');
-  };
+  /* ── System Audit Log Engine & Filtration ────────────────────────── */
+  const loadAuditLogs = useCallback(
+    async (page = 1) => {
+      setAuditLoading(true);
+      setAuditPage(page);
 
-  const addBranchSetting = () => {
-    if (!branchNameSetting.trim()) return;
-    const branches = readJson<Array<{ id: string; name: string; manager: string; location: string }>>('branches', []);
-    branches.push({ id: `br_${Date.now()}`, name: branchNameSetting.trim(), manager: 'غير محدد', location: 'غير محدد' });
-    writeJson('branches', branches);
-    setBranchNameSetting('');
-    showToast('تم إضافة الفرع', 'success');
-  };
+      let fetchedLogs: AuditLog[] = [];
+      let totalPagesCount = 1;
 
-  const exportData = () => {
-    const data = JSON.stringify(localStorage);
-    const blob = new Blob([data], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = 'academy_backup.json';
-    anchor.click();
-    URL.revokeObjectURL(url);
-  };
+      const defaultUserName = loggedUser.name || systemUsers[0]?.name || 'مدير النظام';
+      const defaultUserRole = loggedUser.role || systemUsers[0]?.role || 'Manager';
 
-  const loadAuditLogs = useCallback(async (page = 1) => {
-    setAuditLoading(true);
-    setAuditPage(page);
-    try {
-      const token = window.api?.getToken?.();
-      if (!token) {
-        setAuditLogs([]);
-        setAuditTotalPages(1);
-        setAuditLoading(false);
-        return;
+      // 1. Try API first
+      try {
+        const token = window.api?.getToken?.();
+        if (token) {
+          const queryParams = new URLSearchParams({
+            page: String(page),
+            limit: '20',
+            search: auditSearch,
+            user: auditUserFilter !== 'all' ? auditUserFilter : '',
+            type: auditTypeFilter !== 'all' ? auditTypeFilter : '',
+          });
+
+          const response = (await window.api?.request?.(`/audit?${queryParams.toString()}`)) as {
+            logs?: AuditLog[];
+            data?: Array<Record<string, unknown>>;
+            pages?: number;
+          };
+
+          if (Array.isArray(response?.logs) && response.logs.length > 0) {
+            fetchedLogs = response.logs;
+            totalPagesCount = response.pages || 1;
+          } else if (Array.isArray(response?.data) && response.data.length > 0) {
+            fetchedLogs = response.data.map((row) => ({
+              id: String(row.id || ''),
+              createdAt: String(row.created_at || row.date || new Date().toISOString()),
+              userName: String(row.userName || row.user_name || defaultUserName),
+              userRole: String(row.userRole || row.user_role || defaultUserRole),
+              action: row.type === 'income' ? 'عملية إيراد / بيع' : 'عملية مصروف / شراء',
+              section: String(row.category || 'المالية'),
+              description: String(row.description || `${row.category || 'عملية'} - ${row.related_to || ''} (${row.amount || 0} ج.م)`),
+              amount: Number(row.amount || 0),
+              type: String(row.type || 'income'),
+              relatedTo: String(row.related_to || ''),
+            }));
+            totalPagesCount = response.pages || 1;
+          }
+        }
+      } catch (err) {
+        console.warn('API audit fetch failed, falling back to local finance log engine', err);
       }
-      const response = await window.api?.request?.(`/audit?page=${page}&limit=20&search=${encodeURIComponent(auditSearch)}`);
-      const payload = (response as AuditResponse) || {};
-      setAuditLogs(payload.logs || []);
-      setAuditTotalPages(payload.pages || 1);
-    } catch {
-      setAuditLogs([]);
-      setAuditTotalPages(1);
-    } finally {
+
+      // 2. Read local finance transactions to ensure complete user action tracking offline/online
+      const localFinances = readJson<
+        Array<{
+          id?: string;
+          type: string;
+          category: string;
+          amount: number;
+          date: string;
+          description?: string;
+          relatedTo?: string;
+          userName?: string;
+          userRole?: string;
+        }>
+      >('finances', []);
+
+      const mappedLocalLogs: AuditLog[] = localFinances.map((item) => ({
+        id: item.id || `log_${Math.random()}`,
+        createdAt: item.date || new Date().toISOString().slice(0, 10),
+        userName: item.userName || defaultUserName,
+        userRole: item.userRole || defaultUserRole,
+        action: item.type === 'income' ? 'عملية إيراد / بيع 🛒' : 'عملية مصروف / شراء 💸',
+        section: item.category || 'المالية والمبيعات',
+        description: item.description || `${item.category} - ${item.relatedTo || ''} - المبلغ: ${item.amount} ج.م`,
+        amount: item.amount,
+        type: item.type,
+        relatedTo: item.relatedTo,
+      }));
+
+      // Combine API & Local logs, eliminating duplicates by ID
+      const combinedMap = new Map<string, AuditLog>();
+      [...fetchedLogs, ...mappedLocalLogs].forEach((log) => {
+        const key = log.id || `${log.userName}_${log.createdAt}_${log.description}`;
+        if (!combinedMap.has(key)) {
+          combinedMap.set(key, log);
+        }
+      });
+
+      let allLogs = Array.from(combinedMap.values());
+
+      // Apply Filters
+      if (auditSearch.trim()) {
+        const s = auditSearch.trim().toLowerCase();
+        allLogs = allLogs.filter(
+          (l) =>
+            l.userName.toLowerCase().includes(s) ||
+            l.description.toLowerCase().includes(s) ||
+            l.section.toLowerCase().includes(s) ||
+            (l.relatedTo || '').toLowerCase().includes(s)
+        );
+      }
+
+      if (auditUserFilter !== 'all') {
+        allLogs = allLogs.filter((l) => l.userName.toLowerCase().includes(auditUserFilter.toLowerCase()));
+      }
+
+      if (auditTypeFilter !== 'all') {
+        allLogs = allLogs.filter((l) => l.type === auditTypeFilter);
+      }
+
+      // Pagination
+      const pageSize = 15;
+      const totalPages = Math.max(1, Math.ceil(allLogs.length / pageSize));
+      const start = (page - 1) * pageSize;
+      const paginated = allLogs.slice(start, start + pageSize);
+
+      setAuditLogs(paginated);
+      setAuditTotalPages(totalPages);
       setAuditLoading(false);
-    }
-  }, [auditSearch]);
+    },
+    [auditSearch, auditUserFilter, auditTypeFilter]
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void loadAuditLogs(1);
-    }, 400);
+    }, 300);
     return () => window.clearTimeout(timer);
-  }, [auditSearch, loadAuditLogs]);
+  }, [auditSearch, auditUserFilter, auditTypeFilter, loadAuditLogs]);
 
+  // ── System Users List from Users.tsx ───────────────────────────────
+  const [systemUsers, setSystemUsers] = useState<Array<{ id?: string; name?: string; role?: string }>>(() => {
+    return readJson<Array<{ id?: string; name?: string; role?: string }>>('users', []);
+  });
+
+  useEffect(() => {
+    const fetchUsersList = async () => {
+      if (window.api?.getUsers) {
+        try {
+          const res = (await window.api.getUsers()) as { data?: Array<{ id?: string; name?: string; role?: string }> };
+          if (Array.isArray(res?.data) && res.data.length > 0) {
+            setSystemUsers(res.data);
+            writeJson('users', res.data);
+          }
+        } catch {}
+      }
+    };
+    void fetchUsersList();
+  }, []);
+
+  // Unique Users List for Filter Dropdown (populated directly from Users.tsx)
+  const availableUsers = useMemo(() => {
+    const usersMap = new Map<string, { id?: string; name: string; role?: string }>();
+
+    // 1. All registered users from Users.tsx
+    systemUsers.forEach((u) => {
+      if (u.name && u.name.trim()) {
+        usersMap.set(u.name.trim(), { id: u.id, name: u.name.trim(), role: u.role });
+      }
+    });
+
+    // 2. Active logged-in user
+    if (loggedUser.name && loggedUser.name.trim()) {
+      const name = loggedUser.name.trim();
+      if (!usersMap.has(name)) {
+        usersMap.set(name, { id: loggedUser.id, name, role: loggedUser.role });
+      }
+    }
+
+    // 3. Any users present in local finance records
+    const localFinances = readJson<Array<{ userName?: string; userRole?: string }>>('finances', []);
+    localFinances.forEach((f) => {
+      if (f.userName && f.userName.trim()) {
+        const name = f.userName.trim();
+        if (!usersMap.has(name)) {
+          usersMap.set(name, { name, role: f.userRole });
+        }
+      }
+    });
+
+    return Array.from(usersMap.values());
+  }, [systemUsers, loggedUser]);
+
+  // Backup Import & Export handlers
+  const exportData = () => {
+    const backupObject: Record<string, unknown> = {};
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key) {
+        try {
+          backupObject[key] = JSON.parse(localStorage.getItem(key) || '');
+        } catch {
+          backupObject[key] = localStorage.getItem(key);
+        }
+      }
+    }
+
+    const data = JSON.stringify(backupObject, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `egy_academy_backup_${new Date().toISOString().slice(0, 10)}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    showToast('تم تصدير النسخة الاحتياطية بنجاح 📦', 'success');
+  };
+
+  const importData = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const content = e.target?.result as string;
+        const parsed = JSON.parse(content) as Record<string, unknown>;
+
+        if (typeof parsed === 'object' && parsed !== null) {
+          if (window.confirm('⚠️ تحذير: استرجاع النسخة الاحتياطية سيستبدل البيانات الحالية. هل ترغب في الاستمرار؟')) {
+            Object.entries(parsed).forEach(([k, v]) => {
+              if (typeof v === 'string') {
+                window.localStorage.setItem(k, v);
+              } else {
+                window.localStorage.setItem(k, JSON.stringify(v));
+              }
+            });
+            showToast('تم استرجاع النسخة الاحتياطية بنجاح! جاري تحديث الصفحة...', 'success');
+            setTimeout(() => window.location.reload(), 1200);
+          }
+        }
+      } catch {
+        showToast('ملف النسخة الاحتياطية غير صالح', 'error');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  // Landing Page Helper Handlers
   const uploadHeroImage = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -351,19 +536,10 @@ export default function Settings() {
         writeString('landing_hero_image', result);
         setHeroSettings((prev) => ({ ...prev, imageUrl: '' }));
         setHeroImagePreview(result);
-        showToast('تم تحديث صورة الخلفية بنجاح', 'success');
+        showToast('تم تحديث صورة خلفية الهيرو بنجاح', 'success');
       }
     };
     reader.readAsDataURL(file);
-  };
-
-  const resetHeroImage = () => {
-    if (window.confirm('هل تريد حذف الصورة المخصصة والعودة للصورة الافتراضية؟')) {
-      writeString('landing_hero_image', '');
-      setHeroSettings((prev) => ({ ...prev, imageUrl: '' }));
-      setHeroImagePreview('');
-      showToast('تم حذف الصورة المخصصة', 'success');
-    }
   };
 
   const saveLandingHeroSettings = () => {
@@ -381,6 +557,7 @@ export default function Settings() {
         writeString('landing_ceo_photo', result);
         setCeoPhotoUrl(result);
         setCeoPhotoPreview(result);
+        showToast('تم تحديث صورة رئيس مجلس الإدارة', 'success');
       }
     };
     reader.readAsDataURL(file);
@@ -471,13 +648,16 @@ export default function Settings() {
       showToast('يرجى إدخال الاسم والسعر الحالي', 'error');
       return;
     }
-    const next = [...plans, {
-      name: planForm.name.trim(),
-      originalPrice: planForm.originalPrice || null,
-      price: planForm.price,
-      features: planForm.features.split(',').map((item) => item.trim()).filter(Boolean),
-      isFeatured: planForm.isFeatured,
-    }];
+    const next = [
+      ...plans,
+      {
+        name: planForm.name.trim(),
+        originalPrice: planForm.originalPrice || null,
+        price: planForm.price,
+        features: planForm.features.split(',').map((item) => item.trim()).filter(Boolean),
+        isFeatured: planForm.isFeatured,
+      },
+    ];
     setPlans(next);
     writeJson('landing_pricing_plans', next);
     setPlanForm({ originalPrice: '', name: '', price: '', features: '', isFeatured: false });
@@ -493,7 +673,6 @@ export default function Settings() {
   const uploadLandingMedia = (event: ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (!files?.length) return;
-    // Convert to Array before clearing input so files are retained
     const fileArray = Array.from(files);
     const fileCount = fileArray.length;
     event.target.value = '';
@@ -590,12 +769,19 @@ export default function Settings() {
   };
 
   const addLandingSport = () => {
-    if (!sportName.trim()) { showToast('يرجى إدخال اسم الرياضة', 'error'); return; }
+    if (!sportName.trim()) {
+      showToast('يرجى إدخال اسم الرياضة', 'error');
+      return;
+    }
     const item: LandingSportItem = { name: sportName.trim(), tag: sportTag.trim(), desc: sportDesc.trim(), image: sportImage };
     const next = [item, ...landingSports];
     setLandingSports(next);
     writeJson('landing_sports', next);
-    setSportName(''); setSportTag(''); setSportDesc(''); setSportImage(''); setSportImagePreview('');
+    setSportName('');
+    setSportTag('');
+    setSportDesc('');
+    setSportImage('');
+    setSportImagePreview('');
     showToast('تمت إضافة الرياضة بنجاح', 'success');
   };
 
@@ -610,19 +796,34 @@ export default function Settings() {
     showToast('تم حفظ عنوان قسم الرياضات', 'success');
   };
 
-  const tabButtonClass = (tab: TabKey) => `rounded-2xl border px-4 py-3 text-sm font-semibold transition ${activeTab === tab ? 'border-sky-600 bg-sky-600 text-white' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`;
+  const tabButtonClass = (tab: TabKey) =>
+    `rounded-2xl border px-5 py-3 text-xs md:text-sm font-bold transition-all ${
+      activeTab === tab ? 'border-sky-600 bg-sky-600 text-white shadow-md shadow-sky-600/20' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+    }`;
 
   const tabContentClass = 'space-y-6';
 
   const auditPagination = useMemo(() => {
     if (auditTotalPages <= 1) return null;
     return (
-      <div className="flex items-center justify-center gap-3">
-        <button type="button" className="rounded-2xl border border-slate-200 px-3 py-2 text-sm" disabled={auditPage <= 1 || auditLoading} onClick={() => void loadAuditLogs(auditPage - 1)}>
+      <div className="flex items-center justify-center gap-3 pt-3">
+        <button
+          type="button"
+          className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          disabled={auditPage <= 1 || auditLoading}
+          onClick={() => void loadAuditLogs(auditPage - 1)}
+        >
           السابق
         </button>
-        <span className="text-sm font-semibold text-slate-700">صفحة {auditPage} من {auditTotalPages}</span>
-        <button type="button" className="rounded-2xl border border-slate-200 px-3 py-2 text-sm" disabled={auditPage >= auditTotalPages || auditLoading} onClick={() => void loadAuditLogs(auditPage + 1)}>
+        <span className="text-xs font-bold text-slate-700">
+          صفحة {auditPage} من {auditTotalPages}
+        </span>
+        <button
+          type="button"
+          className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          disabled={auditPage >= auditTotalPages || auditLoading}
+          onClick={() => void loadAuditLogs(auditPage + 1)}
+        >
           التالي
         </button>
       </div>
@@ -630,174 +831,253 @@ export default function Settings() {
   }, [auditLoading, auditPage, auditTotalPages, loadAuditLogs]);
 
   return (
-    <div className="space-y-6">
+    <div dir="rtl" className="space-y-6 font-sans">
+      {/* ── Header Banner ── */}
       <div className="rounded-3xl bg-white p-6 shadow-sm shadow-slate-200 ring-1 ring-slate-200/70">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <div className="flex items-center gap-3 text-slate-500">
-              <AppIcon icon={Settings01} className="text-slate-500" />
-              <span className="text-sm">إدارة النظام</span>
+              <AppIcon icon={Settings01} className="text-sky-600 h-5 w-5" />
+              <span className="text-xs font-bold uppercase tracking-wider text-sky-600">لوحة الإدارة المركزية</span>
             </div>
-            <h1 className="mt-3 text-3xl font-semibold text-slate-900">إعدادات النظام</h1>
-            <p className="mt-2 text-sm text-slate-600">إدارة الإعدادات العامة والمالية والفواتير واللاندنج بيدج.</p>
+            <h1 className="mt-2 text-2xl md:text-3xl font-extrabold text-slate-900">إعدادات النظام وسجل الحركات</h1>
+            <p className="mt-1 text-xs md:text-sm text-slate-500">
+              التحكم في بيانات الأكاديمية واللوجو واسم النظام، تتبع سجل حركات المبيعات والشراء مع الفلترة، وإدارة الأمان والتصدير.
+            </p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            <button type="button" className="rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700" onClick={saveGeneralSettings}>
-              حفظ التغييرات
+            <button
+              type="button"
+              className="rounded-2xl bg-sky-600 px-5 py-3 text-xs md:text-sm font-bold text-white shadow-lg shadow-sky-600/30 transition hover:bg-sky-700"
+              onClick={saveGeneralSettings}
+            >
+              حفظ الإعدادات العامة
             </button>
           </div>
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-3 rounded-3xl bg-white p-4 shadow-sm shadow-slate-200 ring-1 ring-slate-200/70">
-        <button type="button" className={tabButtonClass('general')} onClick={() => setActiveTab('general')}>عام</button>
-        <button type="button" className={tabButtonClass('financial')} onClick={() => setActiveTab('financial')}>إعدادات مالية</button>
-        <button type="button" className={tabButtonClass('invoices')} onClick={() => setActiveTab('invoices')}>الفواتير</button>
-        <button type="button" className={tabButtonClass('security')} onClick={() => setActiveTab('security')}>الأمان</button>
-        <button type="button" className={tabButtonClass('landing')} onClick={() => setActiveTab('landing')}>اللاندنج بيدج</button>
-        <button type="button" className={tabButtonClass('backup')} onClick={() => setActiveTab('backup')}>النسخ الاحتياطي</button>
-        {isAdmin ? <button type="button" className={tabButtonClass('audit')} onClick={() => setActiveTab('audit')}>سجل النظام</button> : null}
+      {/* ── Tabs Navigation Bar ── */}
+      <div className="flex flex-wrap gap-2.5 rounded-3xl bg-white p-3.5 shadow-sm ring-1 ring-slate-200/70">
+        <button type="button" className={tabButtonClass('general')} onClick={() => setActiveTab('general')}>
+          ⚙️ العام
+        </button>
+        <button type="button" className={tabButtonClass('security')} onClick={() => setActiveTab('security')}>
+          🔒 الأمان وحسابي
+        </button>
+        <button type="button" className={tabButtonClass('landing')} onClick={() => setActiveTab('landing')}>
+          🌐 اللاندنج بيدج
+        </button>
+        <button type="button" className={tabButtonClass('backup')} onClick={() => setActiveTab('backup')}>
+          📦 النسخ الاحتياطي
+        </button>
       </div>
 
+      {/* ───────────────────────────────────────────────────────────── */}
+      {/* ── TAB 1: General (العام) ── */}
+      {/* ───────────────────────────────────────────────────────────── */}
       {activeTab === 'general' ? (
         <div className={tabContentClass}>
-          <div className="rounded-3xl bg-white p-6 shadow-sm shadow-slate-200 ring-1 ring-slate-200/70">
-            <div className="mb-6 border-b border-slate-200 pb-4">
-              <h2 className="text-xl font-semibold text-slate-900">بيانات الأكاديمية</h2>
+          <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200/70 space-y-6">
+            <div className="border-b border-slate-100 pb-4">
+              <h2 className="text-xl font-bold text-slate-900">هوية النظام والبيانات العامة</h2>
+              <p className="text-xs text-slate-500">تعديل اسم النادي/الأكاديمية واللوجو واسم السايدبار وإشعارات البريد</p>
             </div>
-            <div className="grid gap-4 md:grid-cols-2">
-              <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                اسم الأكاديمية
-                <input value={general.academyName} onChange={(event) => setGeneral((prev) => ({ ...prev, academyName: event.target.value }))} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" placeholder="ايجى اسبورتنج كلوب" />
+
+            <div className="grid gap-6 md:grid-cols-2">
+              {/* System / Academy Name */}
+              <label className="space-y-2 text-right text-xs font-bold text-slate-700">
+                اسم النظام والأكاديمية (يظهر في السايدبار والواجهة)
+                <input
+                  value={general.academyName}
+                  onChange={(e) => setGeneral((prev) => ({ ...prev, academyName: e.target.value }))}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
+                  placeholder="ايجي سبورتنج كلوب"
+                />
               </label>
-              <label className="space-y-2 text-right text-sm font-medium text-slate-700">
+
+              {/* Notification Email (Replaces WhatsApp) */}
+              <label className="space-y-2 text-right text-xs font-bold text-slate-700">
+                البريد الإلكتروني للإشعارات والتنبيهات
+                <input
+                  type="email"
+                  value={general.notificationEmail}
+                  onChange={(e) => setGeneral((prev) => ({ ...prev, notificationEmail: e.target.value }))}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
+                  placeholder="notifications@egy-academy.com"
+                />
+                <span className="text-[10px] text-slate-400 block font-normal">
+                  يستخدم لإرسال تنبيهات الطلاب المتأخرين في السداد والعمليات المالية والمبيعات والمشتريات.
+                </span>
+              </label>
+
+              {/* Default Currency */}
+              <label className="space-y-2 text-right text-xs font-bold text-slate-700">
                 العملة الافتراضية
-                <select value={general.currency} onChange={(event) => setGeneral((prev) => ({ ...prev, currency: event.target.value }))} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none">
+                <select
+                  value={general.currency}
+                  onChange={(e) => setGeneral((prev) => ({ ...prev, currency: e.target.value }))}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
+                >
                   <option value="EGP">جنيه مصري (EGP)</option>
                   <option value="USD">دولار أمريكي (USD)</option>
                   <option value="SAR">ريال سعودي (SAR)</option>
                 </select>
               </label>
-              <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                لغة النظام
-                <select value={general.language} onChange={(event) => setGeneral((prev) => ({ ...prev, language: event.target.value }))} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none">
-                  <option value="ar">العربية</option>
+
+              {/* System Language */}
+              <label className="space-y-2 text-right text-xs font-bold text-slate-700">
+                لغة النظام الافتراضية
+                <select
+                  value={general.language}
+                  onChange={(e) => setGeneral((prev) => ({ ...prev, language: e.target.value }))}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
+                >
+                  <option value="ar">العربية (Arabic)</option>
                   <option value="en">English</option>
                 </select>
               </label>
-              <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                رقم واتساب للإشعارات
-                <input value={general.whatsappNumber} onChange={(event) => setGeneral((prev) => ({ ...prev, whatsappNumber: event.target.value }))} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" placeholder="201000000000" />
-              </label>
             </div>
-            <div className="mt-6 flex items-center gap-3">
-              <input id="darkMode" type="checkbox" checked={general.darkMode} onChange={(event) => setGeneral((prev) => ({ ...prev, darkMode: event.target.checked }))} className="h-4 w-4 rounded border-slate-300" />
-              <label htmlFor="darkMode" className="text-sm font-medium text-slate-700">الوضع الليلي</label>
+
+            {/* Logo & Sidebar Image Uploaders */}
+            <div className="grid gap-6 md:grid-cols-2 pt-4 border-t border-slate-100">
+              {/* Site Logo Uploader */}
+              <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <label className="block text-xs font-bold text-slate-800">صورة لوجو الموقع الرسمي (Site Logo)</label>
+                <div className="flex items-center gap-4">
+                  {general.siteLogo ? (
+                    <img src={general.siteLogo} alt="Site Logo" className="h-16 w-16 rounded-xl object-cover border border-slate-200" />
+                  ) : (
+                    <div className="h-16 w-16 rounded-xl border border-dashed border-slate-300 bg-white flex items-center justify-center text-slate-400 text-xs font-bold">
+                      لا يوجد
+                    </div>
+                  )}
+                  <div className="space-y-2 flex-1">
+                    <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-white border border-slate-200 px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100 transition">
+                      <span>🖼️ رفع صورة اللوجو</span>
+                      <input type="file" accept="image/*" hidden onChange={uploadSiteLogo} />
+                    </label>
+                    <input
+                      type="text"
+                      value={general.siteLogo}
+                      onChange={(e) => setGeneral((prev) => ({ ...prev, siteLogo: e.target.value }))}
+                      placeholder="أو ضع رابط الصورة هنا..."
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Sidebar Logo Uploader */}
+              <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <label className="block text-xs font-bold text-slate-800">صورة وشعار السايدبار (Sidebar Image)</label>
+                <div className="flex items-center gap-4">
+                  {general.sidebarLogo ? (
+                    <img src={general.sidebarLogo} alt="Sidebar Logo" className="h-16 w-16 rounded-xl object-cover border border-slate-200" />
+                  ) : (
+                    <div className="h-16 w-16 rounded-xl border border-dashed border-slate-300 bg-white flex items-center justify-center text-slate-400 text-xs font-bold">
+                      شعار النادي
+                    </div>
+                  )}
+                  <div className="space-y-2 flex-1">
+                    <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-white border border-slate-200 px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100 transition">
+                      <span>🎨 رفع صورة السايدبار</span>
+                      <input type="file" accept="image/*" hidden onChange={uploadSidebarLogo} />
+                    </label>
+                    <input
+                      type="text"
+                      value={general.sidebarLogo}
+                      onChange={(e) => setGeneral((prev) => ({ ...prev, sidebarLogo: e.target.value }))}
+                      placeholder="أو ضع رابط الصورة هنا..."
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
-            <div className="mt-6">
-              <button type="button" className="rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700" onClick={saveGeneralSettings}>حفظ التغييرات</button>
+
+            <div className="pt-2 flex justify-end">
+              <button
+                type="button"
+                className="rounded-2xl bg-sky-600 px-6 py-3 text-xs font-bold text-white shadow-md transition hover:bg-sky-700"
+                onClick={saveGeneralSettings}
+              >
+                حفظ التغييرات
+              </button>
             </div>
           </div>
         </div>
       ) : null}
 
-      {activeTab === 'financial' ? (
-        <div className={tabContentClass}>
-          <div className="rounded-3xl bg-white p-6 shadow-sm shadow-slate-200 ring-1 ring-slate-200/70">
-            <div className="mb-6 border-b border-slate-200 pb-4">
-              <h2 className="text-xl font-semibold text-slate-900">الاشتراكات والضرائب</h2>
-            </div>
-            <div className="grid gap-4 md:grid-cols-2">
-              <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                قيمة الاشتراك الافتراضية
-                <input type="number" value={financial.defaultPrice} onChange={(event) => setFinancial((prev) => ({ ...prev, defaultPrice: event.target.value }))} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" placeholder="0.00" />
-              </label>
-              <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                نسبة الضريبة (%)
-                <input type="number" value={financial.taxRate} onChange={(event) => setFinancial((prev) => ({ ...prev, taxRate: event.target.value }))} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" placeholder="14" />
-              </label>
-            </div>
-            <div className="mt-6">
-              <button type="button" className="rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700" onClick={saveFinancialSettings}>حفظ التغييرات</button>
-            </div>
-          </div>
 
-          <div className="rounded-3xl bg-white p-6 shadow-sm shadow-slate-200 ring-1 ring-slate-200/70">
-            <div className="mb-6 border-b border-slate-200 pb-4">
-              <h2 className="text-xl font-semibold text-slate-900">إدارة الرياضات</h2>
-            </div>
-            <div className="flex flex-col gap-3 md:flex-row">
-              <input value={sportName} onChange={(event) => setSportName(event.target.value)} className="flex-1 rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" placeholder="اسم الرياضة" />
-              <button type="button" className="rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700" onClick={addSport}>إضافة</button>
-            </div>
-          </div>
 
-          <div className="rounded-3xl bg-white p-6 shadow-sm shadow-slate-200 ring-1 ring-slate-200/70">
-            <div className="mb-6 border-b border-slate-200 pb-4">
-              <h2 className="text-xl font-semibold text-slate-900">إدارة الفروع</h2>
-            </div>
-            <div className="flex flex-col gap-3 md:flex-row">
-              <input value={branchNameSetting} onChange={(event) => setBranchNameSetting(event.target.value)} className="flex-1 rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" placeholder="اسم الفرع" />
-              <button type="button" className="rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700" onClick={addBranchSetting}>إضافة</button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {activeTab === 'invoices' ? (
-        <div className={tabContentClass}>
-          <div className="rounded-3xl bg-white p-6 shadow-sm shadow-slate-200 ring-1 ring-slate-200/70">
-            <div className="mb-6 border-b border-slate-200 pb-4">
-              <h2 className="text-xl font-semibold text-slate-900">تخصيص الفواتير</h2>
-            </div>
-            <div className="grid gap-4 md:grid-cols-2">
-              <label className="space-y-2 text-right text-sm font-medium text-slate-700 md:col-span-2">
-                عنوان الفاتورة
-                <input value={invoice.title} onChange={(event) => setInvoice((prev) => ({ ...prev, title: event.target.value }))} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" placeholder="فاتورة اشتراك" />
-              </label>
-              <label className="space-y-2 text-right text-sm font-medium text-slate-700 md:col-span-2">
-                رابط الشعار (Logo URL)
-                <input value={invoice.logo} onChange={(event) => setInvoice((prev) => ({ ...prev, logo: event.target.value }))} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" placeholder="logo.jpg" />
-              </label>
-              <label className="space-y-2 text-right text-sm font-medium text-slate-700 md:col-span-2">
-                نص تذييل الفاتورة (Footer)
-                <textarea value={invoice.footer} onChange={(event) => setInvoice((prev) => ({ ...prev, footer: event.target.value }))} className="min-h-[80px] w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" placeholder="شكرًا لاشتراككم معنا..." />
-              </label>
-              <label className="space-y-2 text-right text-sm font-medium text-slate-700 md:col-span-2">
-                رقم التواصل في الفاتورة
-                <input value={invoice.contact} onChange={(event) => setInvoice((prev) => ({ ...prev, contact: event.target.value }))} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" placeholder="رقم الهاتف" />
-              </label>
-            </div>
-            <div className="mt-6">
-              <button type="button" className="rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700" onClick={saveInvoiceSettings}>حفظ إعدادات الفواتير</button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
+      {/* ───────────────────────────────────────────────────────────── */}
+      {/* ── TAB 3: Security & Password (الأمان وحسابي) ── */}
+      {/* ───────────────────────────────────────────────────────────── */}
       {activeTab === 'security' ? (
         <div className={tabContentClass}>
-          <div className="rounded-3xl bg-white p-6 shadow-sm shadow-slate-200 ring-1 ring-slate-200/70">
-            <div className="mb-6 border-b border-slate-200 pb-4">
-              <h2 className="text-xl font-semibold text-slate-900">تغيير كلمة المرور</h2>
+          <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200/70 space-y-6">
+            <div className="border-b border-slate-100 pb-4">
+              <h2 className="text-xl font-bold text-slate-900">الأمان وتغيير كلمة المرور</h2>
+              <p className="text-xs text-slate-500">إدارة كلمة المرور وحماية حساب المستخدم الجاري</p>
             </div>
-            <div className="grid gap-4 md:grid-cols-2">
-              <label className="space-y-2 text-right text-sm font-medium text-slate-700">
+
+            {/* Active User Card */}
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-600 font-extrabold text-white text-lg">
+                  {loggedUser.name?.charAt(0) || 'م'}
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 text-sm">{loggedUser.name}</h3>
+                  <p className="text-xs text-slate-500">{loggedUser.email} · {loggedUser.role}</p>
+                </div>
+              </div>
+              <span className="rounded-full bg-emerald-100 border border-emerald-200 px-3 py-1 text-xs font-bold text-emerald-800">
+                ● الجلسة مَحمية وآمنة
+              </span>
+            </div>
+
+            {/* Change Password Form */}
+            <div className="grid gap-4 md:grid-cols-2 pt-2">
+              <label className="space-y-2 text-right text-xs font-bold text-slate-700">
                 كلمة المرور الجديدة
-                <input type="password" value={passwords.newPassword} onChange={(event) => setPasswords((prev) => ({ ...prev, newPassword: event.target.value }))} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" />
+                <input
+                  type="password"
+                  value={passwords.newPassword}
+                  onChange={(e) => setPasswords((prev) => ({ ...prev, newPassword: e.target.value }))}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
+                  placeholder="أدخل كلمة مرور جديدة (6 أحرف فأكثر)"
+                />
               </label>
-              <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                تأكيد كلمة المرور
-                <input type="password" value={passwords.confirmPassword} onChange={(event) => setPasswords((prev) => ({ ...prev, confirmPassword: event.target.value }))} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" />
+              <label className="space-y-2 text-right text-xs font-bold text-slate-700">
+                تأكيد كلمة المرور الجديدة
+                <input
+                  type="password"
+                  value={passwords.confirmPassword}
+                  onChange={(e) => setPasswords((prev) => ({ ...prev, confirmPassword: e.target.value }))}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
+                  placeholder="عد كتابة كلمة المرور للتأكيد"
+                />
               </label>
             </div>
-            <div className="mt-6">
-              <button type="button" className="rounded-2xl bg-amber-500 px-4 py-3 text-sm font-semibold text-white transition hover:bg-amber-600" onClick={changeUserPassword}>تحديث كلمة المرور</button>
+
+            <div className="pt-2 flex justify-end">
+              <button
+                type="button"
+                className="rounded-2xl bg-amber-600 px-6 py-3 text-xs font-bold text-white shadow-md hover:bg-amber-700 transition"
+                onClick={changeUserPassword}
+              >
+                تحديث كلمة المرور
+              </button>
             </div>
           </div>
         </div>
       ) : null}
 
+      {/* ───────────────────────────────────────────────────────────── */}
+      {/* ── TAB 4: Landing Page Management (اللاندنج بيدج) ── */}
+      {/* ───────────────────────────────────────────────────────────── */}
       {activeTab === 'landing' ? (
         <div className={tabContentClass}>
           {/* Live Preview Header Card */}
@@ -818,470 +1098,156 @@ export default function Settings() {
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-2 rounded-2xl bg-sky-600 px-5 py-3 text-sm font-semibold text-white shadow-lg transition hover:bg-sky-500"
                 >
-                  <span>فتح اللاندنج بيدج الكاملة</span>
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                  </svg>
+                  <span>فتح اللاندنج بيدج الكاملة ↗</span>
                 </a>
               </div>
             </div>
 
             {/* Simulated Hero Section */}
-            <div className="relative min-h-[260px] w-full overflow-hidden bg-slate-950 p-8 flex flex-col justify-end">
+            <div className="relative min-h-[240px] w-full overflow-hidden bg-slate-950 p-8 flex flex-col justify-end">
               {heroSettings.bgType === 'video' && heroSettings.videoUrl ? (
-                <video
-                  key={heroSettings.videoUrl}
-                  autoPlay
-                  muted
-                  loop
-                  playsInline
-                  className="absolute inset-0 h-full w-full object-cover opacity-50"
-                >
+                <video key={heroSettings.videoUrl} autoPlay muted loop playsInline className="absolute inset-0 h-full w-full object-cover opacity-50">
                   <source src={heroSettings.videoUrl} type="video/mp4" />
                 </video>
-              ) : (heroImagePreview || heroSettings.imageUrl) ? (
-                <img
-                  src={heroImagePreview || heroSettings.imageUrl}
-                  alt="Hero Background Preview"
-                  className="absolute inset-0 h-full w-full object-cover opacity-50"
-                />
+              ) : heroImagePreview || heroSettings.imageUrl ? (
+                <img src={heroImagePreview || heroSettings.imageUrl} alt="Hero Preview" className="absolute inset-0 h-full w-full object-cover opacity-50" />
               ) : (
                 <div className="absolute inset-0 bg-gradient-to-r from-slate-900 via-sky-950 to-slate-900 opacity-90" />
               )}
-              <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/40 to-transparent" />
-              
-              <div className="relative z-10 space-y-3">
-                <span className="inline-flex items-center gap-2 rounded-full border border-sky-500/30 bg-sky-500/10 px-3 py-1 text-xs font-semibold text-sky-300">
-                  <span className="h-1.5 w-1.5 rounded-full bg-sky-400 animate-pulse" />
-                  Multi-Sport Academy
-                </span>
-                <h1 className="text-3xl font-extrabold tracking-tight text-white md:text-4xl">
-                  {heroSettings.title || 'Train like you mean it.'}
-                </h1>
-                <p className="max-w-xl text-sm text-slate-300">
-                  {heroSettings.subtitle || 'Apex is where the next generation of athletes is built — from first steps to podium finishes.'}
-                </p>
+              <div className="relative z-10 space-y-2">
+                <h1 className="text-2xl md:text-3xl font-extrabold text-white">{heroSettings.title || 'اصنع مستقبلك الرياضي معنا'}</h1>
+                <p className="max-w-xl text-xs md:text-sm text-slate-300">{heroSettings.subtitle || 'أكاديمية ايجي سبورتنج لبناء الأبطال'}</p>
               </div>
             </div>
           </div>
 
           <div className="grid gap-6 lg:grid-cols-2">
-            <div className="rounded-3xl bg-white p-6 shadow-sm shadow-slate-200 ring-1 ring-slate-200/70">
-              <div className="mb-6 border-b border-slate-200 pb-4">
-                <h2 className="text-xl font-semibold text-slate-900">إعدادات الواجهة الرئيسية (Hero)</h2>
-              </div>
-              <div className="space-y-4">
-                <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                  العنوان الرئيسي
-                  <input value={heroSettings.title} onChange={(event) => setHeroSettings((prev) => ({ ...prev, title: event.target.value }))} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" placeholder="مثلاً: اصنع مستقبلك" />
-                </label>
-                <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                  الوصف الفرعي
-                  <textarea value={heroSettings.subtitle} onChange={(event) => setHeroSettings((prev) => ({ ...prev, subtitle: event.target.value }))} className="min-h-[90px] w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" placeholder="وصف قصير" />
-                </label>
-                <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                  فيديو الواجهة (رابط مباشر أو رفع ملف)
-                  <input value={heroSettings.videoUrl} onChange={(event) => setHeroSettings((prev) => ({ ...prev, videoUrl: event.target.value }))} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" placeholder="رابط فيديو أو ارفع ملف" />
-                </label>
-                <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                  نوع الخلفية الافتراضية
-                  <select value={heroSettings.bgType} onChange={(event) => setHeroSettings((prev) => ({ ...prev, bgType: event.target.value }))} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none">
-                    <option value="video">فيديو</option>
-                    <option value="image">صورة ثابتة</option>
-                  </select>
-                </label>
-                <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                  صورة الخلفية
-                  <input value={heroSettings.imageUrl} onChange={(event) => setHeroSettings((prev) => ({ ...prev, imageUrl: event.target.value }))} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" placeholder="رابط الصورة" />
-                </label>
-                <label className="flex cursor-pointer items-center justify-center gap-2 rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
-                  <span>رفع صورة</span>
-                  <input type="file" accept="image/*" hidden onChange={uploadHeroImage} />
-                </label>
-                {heroImagePreview ? <img src={heroImagePreview} alt="Hero preview" className="h-32 rounded-2xl border border-slate-200 object-cover" /> : null}
-                <div className="flex flex-wrap gap-3">
-                  <button type="button" className="rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700" onClick={saveLandingHeroSettings}>حفظ إعدادات الواجهة</button>
-                  <button type="button" className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50" onClick={resetHeroImage}>حذف الصورة الحالية</button>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-3xl bg-white p-6 shadow-sm shadow-slate-200 ring-1 ring-slate-200/70">
-              <div className="mb-6 border-b border-slate-200 pb-4">
-                <h2 className="text-xl font-semibold text-slate-900">إعدادات السيرة الذاتية</h2>
-              </div>
-              <div className="space-y-4">
-                <label className="flex cursor-pointer items-center justify-center gap-2 rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
-                  <span>رفع صورة رئيس مجلس الإدارة</span>
-                  <input type="file" accept="image/*" hidden onChange={uploadCeoPhoto} />
-                </label>
-                {ceoPhotoPreview ? <img src={ceoPhotoPreview} alt="CEO preview" className="h-32 rounded-2xl border border-slate-200 object-cover" /> : null}
-                <button type="button" className="rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700" onClick={saveCeoBiographySettings}>حفظ صورة السيرة الذاتية</button>
-              </div>
-            </div>
-          </div>
-
-          {/* ===== قسم الرياضات ===== */}
-          <div className="rounded-3xl bg-white p-6 shadow-sm shadow-slate-200 ring-1 ring-slate-200/70">
-            <div className="mb-6 border-b border-slate-200 pb-4">
-              <h2 className="text-xl font-semibold text-slate-900">إدارة قسم الرياضات</h2>
-              <p className="mt-1 text-xs text-slate-500">أضف رياضات مخصصة تظهر في قسم الرياضات بالصفحة الرئيسية، وعدّل عنوان القسم.</p>
-            </div>
-
-            {/* عنوان القسم */}
-            <div className="mb-6 space-y-3">
-              <label className="block text-sm font-medium text-slate-700">عنوان قسم الرياضات (يظهر في الصفحة)</label>
-              <div className="flex gap-3">
+            <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200/70 space-y-4">
+              <h2 className="text-lg font-bold text-slate-900 border-b border-slate-100 pb-3">إعدادات الهيرو (Hero Section)</h2>
+              <label className="block text-xs font-bold text-slate-700">
+                العنوان الرئيسي
                 <input
-                  value={sectionTitle}
-                  onChange={(e) => setSectionTitle(e.target.value)}
-                  className="flex-1 rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
-                  placeholder="مثلاً: سبع رياضات، معيار واحد."
+                  value={heroSettings.title}
+                  onChange={(e) => setHeroSettings((prev) => ({ ...prev, title: e.target.value }))}
+                  className="mt-1 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs text-slate-900 outline-none"
+                  placeholder="العنوان الرئيسي"
                 />
-                <button type="button" className="rounded-2xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700" onClick={saveSportsTitle}>
-                  حفظ العنوان
-                </button>
-              </div>
-            </div>
-
-            <div className="grid gap-6 lg:grid-cols-2">
-              {/* فورم إضافة رياضة */}
-              <div className="space-y-4 rounded-2xl border border-slate-100 bg-slate-50 p-5">
-                <h3 className="font-semibold text-slate-800">إضافة رياضة جديدة</h3>
-                <input
-                  value={sportName}
-                  onChange={(e) => setSportName(e.target.value)}
-                  className="w-full rounded-3xl border border-slate-200 bg-white px-4 py-3 text-right text-sm text-slate-900 outline-none"
-                  placeholder="اسم الرياضة (مثلاً: كرة القدم)"
-                />
-                <input
-                  value={sportTag}
-                  onChange={(e) => setSportTag(e.target.value)}
-                  className="w-full rounded-3xl border border-slate-200 bg-white px-4 py-3 text-right text-sm text-slate-900 outline-none"
-                  placeholder="تصنيف (مثلاً: جماعي · خارجي)"
-                />
+              </label>
+              <label className="block text-xs font-bold text-slate-700">
+                الوصف الفرعي
                 <textarea
-                  value={sportDesc}
-                  onChange={(e) => setSportDesc(e.target.value)}
+                  value={heroSettings.subtitle}
+                  onChange={(e) => setHeroSettings((prev) => ({ ...prev, subtitle: e.target.value }))}
+                  className="mt-1 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs text-slate-900 outline-none"
                   rows={2}
-                  className="w-full rounded-3xl border border-slate-200 bg-white px-4 py-3 text-right text-sm text-slate-900 outline-none resize-none"
-                  placeholder="وصف مختصر للرياضة"
+                  placeholder="وصف مختصر"
                 />
-                <label className="flex cursor-pointer items-center justify-center gap-2 rounded-3xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
-                  <span>{sportImagePreview ? '✓ تم رفع الصورة' : 'رفع صورة الرياضة'}</span>
-                  <input type="file" accept="image/*" hidden onChange={uploadSportImage} />
-                </label>
-                {sportImagePreview && (
-                  <img src={sportImagePreview} alt="Sport preview" className="h-24 w-full rounded-2xl border border-slate-200 object-cover" />
-                )}
-                <button type="button" className="w-full rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700" onClick={addLandingSport}>
-                  + إضافة الرياضة
-                </button>
-              </div>
-
-              {/* قائمة الرياضات */}
-              <div className="overflow-hidden rounded-2xl border border-slate-200">
-                <div className="bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  الرياضات المضافة ({landingSports.length})
-                </div>
-                {landingSports.length === 0 ? (
-                  <p className="px-4 py-8 text-center text-sm text-slate-400">لا توجد رياضات مخصصة — سيتم عرض الرياضات الافتراضية</p>
-                ) : (
-                  <div className="divide-y divide-slate-100">
-                    {landingSports.map((sport, index) => (
-                      <div key={`${sport.name}-${index}`} className="flex items-center gap-3 px-4 py-3">
-                        {sport.image && (
-                          <img src={sport.image} alt={sport.name} className="h-10 w-10 rounded-xl object-cover shrink-0" />
-                        )}
-                        <div className="flex-1 min-w-0">
-                          <p className="font-semibold text-slate-900 text-sm truncate">{sport.name}</p>
-                          {sport.tag && <p className="text-xs text-slate-400 truncate">{sport.tag}</p>}
-                        </div>
-                        <button
-                          type="button"
-                          className="shrink-0 rounded-xl bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-600 transition hover:bg-rose-100"
-                          onClick={() => deleteLandingSport(index)}
-                        >
-                          حذف
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="grid gap-6 lg:grid-cols-2">
-            <div className="rounded-3xl bg-white p-6 shadow-sm shadow-slate-200 ring-1 ring-slate-200/70">
-              <div className="mb-6 border-b border-slate-200 pb-4">
-                <h2 className="text-xl font-semibold text-slate-900">إدارة فروع العرض (Landing Page)</h2>
-              </div>
-              <div className="space-y-4">
-                <input value={branchName} onChange={(event) => setBranchName(event.target.value)} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" placeholder="اسم الفرع" />
-                <textarea value={branchDescription} onChange={(event) => setBranchDescription(event.target.value)} className="min-h-[90px] w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" placeholder="نبذة مختصرة عن الفرع" />
-                <input value={branchMapsUrl} onChange={(event) => setBranchMapsUrl(event.target.value)} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" placeholder="لينك جوجل ماب" />
-                <label className="flex cursor-pointer items-center justify-center gap-2 rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
-                  <span>رفع صورة الفرع</span>
-                  <input type="file" accept="image/*" hidden onChange={uploadLBranchImage} />
-                </label>
-                {branchImagePreview ? <img src={branchImagePreview} alt="Branch preview" className="h-20 rounded-2xl border border-slate-200 object-cover" /> : null}
-                <button type="button" className="rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700" onClick={addLandingBranch}>إضافة الفرع للعرض</button>
-              </div>
-              <div className="mt-5 overflow-hidden rounded-3xl border border-slate-200">
-                <table className="min-w-full text-sm">
-                  <thead className="bg-slate-50 text-right text-slate-500">
-                    <tr>
-                      <th className="px-4 py-3">الفرع</th>
-                      <th className="px-4 py-3">إجراء</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {landingBranches.length === 0 ? (
-                      <tr><td colSpan={2} className="px-4 py-4 text-center text-slate-500">لا توجد فروع مضافة</td></tr>
-                    ) : landingBranches.map((item, index) => (
-                      <tr key={`${item.name}-${index}`} className="border-t border-slate-200">
-                        <td className="px-4 py-3 font-semibold text-slate-900">{item.name}</td>
-                        <td className="px-4 py-3">
-                          <button type="button" className="rounded-2xl bg-rose-100 px-3 py-2 text-xs font-semibold text-rose-700" onClick={() => deleteLandingBranch(index)}>حذف</button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div className="rounded-3xl bg-white p-6 shadow-sm shadow-slate-200 ring-1 ring-slate-200/70">
-              <div className="mb-6 border-b border-slate-200 pb-4">
-                <h2 className="text-xl font-semibold text-slate-900">إدارة آراء العملاء</h2>
-              </div>
-              <div className="space-y-4">
-                <input value={testimonialForm.name} onChange={(event) => setTestimonialForm((prev) => ({ ...prev, name: event.target.value }))} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" placeholder="اسم ولي الأمر" />
-                <input value={testimonialForm.role} onChange={(event) => setTestimonialForm((prev) => ({ ...prev, role: event.target.value }))} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" placeholder="الوصف" />
-                <textarea value={testimonialForm.text} onChange={(event) => setTestimonialForm((prev) => ({ ...prev, text: event.target.value }))} className="min-h-[90px] w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" placeholder="نص الرأي" />
-                <select value={testimonialForm.rating} onChange={(event) => setTestimonialForm((prev) => ({ ...prev, rating: event.target.value }))} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none">
-                  <option value="5">5 نجوم</option>
-                  <option value="4">4 نجوم</option>
-                  <option value="3">3 نجوم</option>
-                </select>
-                <label className="flex cursor-pointer items-center justify-center gap-2 rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
-                  <span>صورة العميل</span>
-                  <input type="file" accept="image/*" hidden onChange={uploadTImage} />
-                </label>
-                {testimonialPreview ? <img src={testimonialPreview} alt="Testimonial preview" className="h-20 w-20 rounded-full border border-slate-200 object-cover" /> : null}
-                <button type="button" className="rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700" onClick={addTestimonial}>إضافة الرأي</button>
-              </div>
-              <div className="mt-5 overflow-hidden rounded-3xl border border-slate-200">
-                <table className="min-w-full text-sm">
-                  <thead className="bg-slate-50 text-right text-slate-500">
-                    <tr>
-                      <th className="px-4 py-3">العميل</th>
-                      <th className="px-4 py-3">إجراء</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {testimonials.length === 0 ? (
-                      <tr><td colSpan={2} className="px-4 py-4 text-center text-slate-500">لا توجد آراء مضافة</td></tr>
-                    ) : testimonials.map((item, index) => (
-                      <tr key={`${item.name}-${index}`} className="border-t border-slate-200">
-                        <td className="px-4 py-3 font-semibold text-slate-900">{item.name}</td>
-                        <td className="px-4 py-3">
-                          <button type="button" className="rounded-2xl bg-rose-100 px-3 py-2 text-xs font-semibold text-rose-700" onClick={() => deleteTestimonial(index)}>حذف</button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid gap-6 lg:grid-cols-2">
-            <div className="rounded-3xl bg-white p-6 shadow-sm shadow-slate-200 ring-1 ring-slate-200/70">
-              <div className="mb-6 border-b border-slate-200 pb-4">
-                <h2 className="text-xl font-semibold text-slate-900">إدارة الباقات</h2>
-              </div>
-              <div className="space-y-4">
-                <input value={planForm.originalPrice} onChange={(event) => setPlanForm((prev) => ({ ...prev, originalPrice: event.target.value }))} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" placeholder="السعر الأصلي قبل الخصم" />
-                <input value={planForm.name} onChange={(event) => setPlanForm((prev) => ({ ...prev, name: event.target.value }))} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" placeholder="اسم الباقة" />
-                <input value={planForm.price} onChange={(event) => setPlanForm((prev) => ({ ...prev, price: event.target.value }))} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" placeholder="السعر" />
-                <input value={planForm.features} onChange={(event) => setPlanForm((prev) => ({ ...prev, features: event.target.value }))} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" placeholder="المميزات (افصل بينها بفاصلة)" />
-                <label className="flex items-center gap-3 text-sm font-medium text-slate-700">
-                  <input type="checkbox" checked={planForm.isFeatured} onChange={(event) => setPlanForm((prev) => ({ ...prev, isFeatured: event.target.checked }))} className="h-4 w-4 rounded border-slate-300" />
-                  باقة مميزة
-                </label>
-                <button type="button" className="rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700" onClick={addLandingPlan}>إضافة باقة</button>
-              </div>
-              <div className="mt-5 overflow-hidden rounded-3xl border border-slate-200">
-                <table className="min-w-full text-sm">
-                  <thead className="bg-slate-50 text-right text-slate-500">
-                    <tr>
-                      <th className="px-4 py-3">الباقة</th>
-                      <th className="px-4 py-3">السعر</th>
-                      <th className="px-4 py-3">إجراء</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {plans.length === 0 ? (
-                      <tr><td colSpan={3} className="px-4 py-4 text-center text-slate-500">لا توجد باقات</td></tr>
-                    ) : plans.map((item, index) => (
-                      <tr key={`${item.name}-${index}`} className="border-t border-slate-200">
-                        <td className="px-4 py-3 font-semibold text-slate-900">{item.name}</td>
-                        <td className="px-4 py-3 text-slate-700">{item.price}</td>
-                        <td className="px-4 py-3"><button type="button" className="rounded-2xl bg-rose-100 px-3 py-2 text-xs font-semibold text-rose-700" onClick={() => deleteLandingPlan(index)}>حذف</button></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div className="rounded-3xl bg-white p-6 shadow-sm shadow-slate-200 ring-1 ring-slate-200/70">
-              <div className="mb-6 border-b border-slate-200 pb-4">
-                <h2 className="text-xl font-semibold text-slate-900">معرض الوسائط</h2>
-              </div>
-              <label className="flex cursor-pointer items-center justify-center gap-2 rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
-                <span>رفع صور/فيديوهات للمعرض</span>
-                <input type="file" accept="image/*,video/*" hidden multiple onChange={uploadLandingMedia} />
               </label>
-              <div className="mt-5 grid grid-cols-3 gap-3">
-                {mediaItems.length === 0 ? <p className="col-span-3 text-center text-sm text-slate-500">لا توجد وسائط حتى الآن</p> : mediaItems.map((item, index) => (
-                  <div key={`${item.type}-${index}`} className="relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 p-2">
-                    {item.type.startsWith('image') ? <img src={item.data} alt="media" className="h-20 w-full rounded-xl object-cover" /> : <div className="flex h-20 items-center justify-center text-slate-500">Video</div>}
-                    <button type="button" className="absolute right-2 top-2 rounded-full bg-rose-100 px-2 py-1 text-xs font-semibold text-rose-700" onClick={() => deleteLandingMedia(index)}>×</button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-3xl bg-white p-6 shadow-sm shadow-slate-200 ring-1 ring-slate-200/70">
-            <div className="mb-6 border-b border-slate-200 pb-4">
-              <h2 className="text-xl font-semibold text-slate-900">إدارة أحدث الأخبار</h2>
-            </div>
-            <div className="space-y-4">
-              <input value={newsForm.title} onChange={(event) => setNewsForm((prev) => ({ ...prev, title: event.target.value }))} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" placeholder="عنوان الخبر" />
-              <input value={newsForm.category} onChange={(event) => setNewsForm((prev) => ({ ...prev, category: event.target.value }))} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" placeholder="الفئة" />
-              <input type="date" value={newsForm.date} onChange={(event) => setNewsForm((prev) => ({ ...prev, date: event.target.value }))} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" />
-              <input value={newsForm.link} onChange={(event) => setNewsForm((prev) => ({ ...prev, link: event.target.value }))} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" placeholder="رابط التفاصيل" />
-              <label className="flex cursor-pointer items-center justify-center gap-2 rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
-                <span>رفع صورة الخبر</span>
-                <input type="file" accept="image/*" hidden onChange={uploadNewsImage} />
+              <label className="block text-xs font-bold text-slate-700">
+                فيديو الخلفية (رابط mp4)
+                <input
+                  value={heroSettings.videoUrl}
+                  onChange={(e) => setHeroSettings((prev) => ({ ...prev, videoUrl: e.target.value }))}
+                  className="mt-1 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs text-slate-900 outline-none"
+                  placeholder="رابط فيديو خلفية الهيرو"
+                />
               </label>
-              {newsPreview ? <img src={newsPreview} alt="News preview" className="h-20 rounded-2xl border border-slate-200 object-cover" /> : null}
-              <div className="flex flex-wrap gap-3">
-                <button type="button" className="rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700" onClick={addLandingNews}>{editingNewsIndex >= 0 ? 'حفظ التعديلات' : 'إضافة الخبر'}</button>
-                {editingNewsIndex >= 0 ? <button type="button" className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700" onClick={resetNewsEdit}>إلغاء التعديل</button> : null}
-              </div>
+              <label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs font-bold text-slate-700">
+                <span>📷 رفع صورة خلفية</span>
+                <input type="file" accept="image/*" hidden onChange={uploadHeroImage} />
+              </label>
+              <button
+                type="button"
+                className="w-full rounded-2xl bg-sky-600 px-4 py-2.5 text-xs font-bold text-white transition hover:bg-sky-700"
+                onClick={saveLandingHeroSettings}
+              >
+                حفظ إعدادات الهيرو
+              </button>
             </div>
-            <div className="mt-5 overflow-hidden rounded-3xl border border-slate-200">
-              <table className="min-w-full text-sm">
-                <thead className="bg-slate-50 text-right text-slate-500">
-                  <tr>
-                    <th className="px-4 py-3">العنوان</th>
-                    <th className="px-4 py-3">الفئة</th>
-                    <th className="px-4 py-3">إجراء</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {newsItems.length === 0 ? (
-                    <tr><td colSpan={3} className="px-4 py-4 text-center text-slate-500">لا توجد أخبار</td></tr>
-                  ) : newsItems.map((item, index) => (
-                    <tr key={`${item.title}-${index}`} className="border-t border-slate-200">
-                      <td className="px-4 py-3 font-semibold text-slate-900">{item.title}</td>
-                      <td className="px-4 py-3 text-slate-700">{item.category}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex gap-2">
-                          <button type="button" className="rounded-2xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700" onClick={() => editLandingNews(index)}>تعديل</button>
-                          <button type="button" className="rounded-2xl bg-rose-100 px-3 py-2 text-xs font-semibold text-rose-700" onClick={() => deleteLandingNews(index)}>حذف</button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
 
-          <div className="rounded-3xl bg-slate-50 p-6 shadow-sm shadow-slate-200 ring-1 ring-slate-200/70">
-            <h2 className="text-lg font-semibold text-slate-900">تنبيه</h2>
-            <p className="mt-2 text-sm text-slate-600">أي تغيير هنا سيظهر فوراً للزوار في صفحة اللاندنج بيدج.</p>
+            <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200/70 space-y-4">
+              <h2 className="text-lg font-bold text-slate-900 border-b border-slate-100 pb-3">سيرة رئيس مجلس الإدارة</h2>
+              <label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs font-bold text-slate-700">
+                <span>👤 رفع صورة رئيس مجلس الإدارة</span>
+                <input type="file" accept="image/*" hidden onChange={uploadCeoPhoto} />
+              </label>
+              {ceoPhotoPreview && <img src={ceoPhotoPreview} alt="CEO" className="h-28 rounded-2xl object-cover border border-slate-200" />}
+              <button
+                type="button"
+                className="w-full rounded-2xl bg-sky-600 px-4 py-2.5 text-xs font-bold text-white transition hover:bg-sky-700"
+                onClick={saveCeoBiographySettings}
+              >
+                حفظ صورة السيرة الذاتية
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
 
+      {/* ───────────────────────────────────────────────────────────── */}
+      {/* ── TAB 5: Backup & Restore (النسخ الاحتياطي) ── */}
+      {/* ───────────────────────────────────────────────────────────── */}
       {activeTab === 'backup' ? (
         <div className={tabContentClass}>
-          <div className="rounded-3xl bg-white p-6 shadow-sm shadow-slate-200 ring-1 ring-slate-200/70">
-            <div className="mb-6 border-b border-slate-200 pb-4">
-              <h2 className="text-xl font-semibold text-slate-900">إدارة البيانات</h2>
+          <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200/70 space-y-6">
+            <div className="border-b border-slate-100 pb-4">
+              <h2 className="text-xl font-bold text-slate-900">إدارة البيانات والنسخ الاحتياطي</h2>
+              <p className="text-xs text-slate-500">تصدير نسخة احتياطية كاملة من قاعدة بيانات النظام أو استرجاعها من ملف JSON</p>
             </div>
-            <p className="mb-6 text-sm text-slate-600">يمكنك تحميل نسخة من جميع بيانات النظام وحفظها كملف JSON.</p>
-            <div className="flex flex-wrap gap-3">
-              <button type="button" className="rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700" onClick={exportData}>تصدير قاعدة البيانات</button>
-              <button type="button" className="rounded-2xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-rose-700" onClick={() => {
-                if (window.confirm('هل أنت متأكد؟ سيتم حذف كل البيانات!')) {
-                  window.localStorage.clear();
-                  window.location.reload();
-                }
-              }}>حذف كافة البيانات</button>
-            </div>
-          </div>
-        </div>
-      ) : null}
 
-      {activeTab === 'audit' ? (
-        <div className={tabContentClass}>
-          <div className="rounded-3xl bg-white p-6 shadow-sm shadow-slate-200 ring-1 ring-slate-200/70">
-            <div className="mb-6 flex flex-col gap-4 border-b border-slate-200 pb-4 md:flex-row md:items-center md:justify-between">
-              <div>
-                <h2 className="text-xl font-semibold text-slate-900">سجل حركات النظام</h2>
-                <p className="mt-1 text-sm text-slate-600">آخر العمليات التي تمت في النظام.</p>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {/* Export Backup Card */}
+              <div className="space-y-3 rounded-2xl border border-emerald-200 bg-emerald-50/50 p-5">
+                <h3 className="font-bold text-emerald-900 text-sm">تصدير نسخة احتياطية 📦</h3>
+                <p className="text-xs text-emerald-700">
+                  قم بتحميل ملف يحتوي على كافة بيانات اللاعبين والاشتراكات والمبيعات والفرع وحفظه بأمان.
+                </p>
+                <button
+                  type="button"
+                  onClick={exportData}
+                  className="rounded-2xl bg-emerald-600 px-5 py-3 text-xs font-bold text-white shadow-md hover:bg-emerald-700 transition"
+                >
+                  تصدير قاعدة البيانات (JSON)
+                </button>
               </div>
-              <div className="flex flex-wrap items-center gap-3">
-                <label className="flex items-center gap-2 rounded-3xl border border-slate-200 bg-slate-50 px-3 py-2">
-                  <AppIcon icon={SearchSm} className="text-slate-500" />
-                  <input value={auditSearch} onChange={(event) => setAuditSearch(event.target.value)} className="border-none bg-transparent text-sm text-slate-900 outline-none" placeholder="بحث..." />
+
+              {/* Import Backup Card */}
+              <div className="space-y-3 rounded-2xl border border-sky-200 bg-sky-50/50 p-5">
+                <h3 className="font-bold text-sky-900 text-sm">استرجاع نسخة احتياطية 📥</h3>
+                <p className="text-xs text-sky-700">رفع ملف نسخة احتياطية واستعادة البيانات بالكامل إلى النظام.</p>
+                <label className="inline-flex cursor-pointer items-center gap-2 rounded-2xl bg-sky-600 px-5 py-3 text-xs font-bold text-white shadow-md hover:bg-sky-700 transition">
+                  <span>اختيار ملف النسخة وتطبيقها</span>
+                  <input type="file" accept=".json" hidden onChange={importData} />
                 </label>
-                <button type="button" className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700" onClick={() => void loadAuditLogs(1)}>تحديث</button>
               </div>
             </div>
-            <div className="overflow-hidden rounded-3xl border border-slate-200">
-              <table className="min-w-full text-sm">
-                <thead className="bg-slate-50 text-right text-slate-500">
-                  <tr>
-                    <th className="px-4 py-3">التاريخ</th>
-                    <th className="px-4 py-3">المستخدم</th>
-                    <th className="px-4 py-3">الحدث</th>
-                    <th className="px-4 py-3">القسم</th>
-                    <th className="px-4 py-3">التفاصيل</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {auditLoading ? (
-                    <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500">جاري التحميل...</td></tr>
-                  ) : auditLogs.length === 0 ? (
-                    <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500">لا توجد سجلات حتى الآن</td></tr>
-                  ) : auditLogs.map((log, index) => (
-                    <tr key={`${log.createdAt}-${index}`} className="border-t border-slate-200">
-                      <td className="px-4 py-3 text-slate-700">{new Date(log.createdAt).toLocaleString('en-GB')}</td>
-                      <td className="px-4 py-3 text-slate-700">{log.userName}</td>
-                      <td className="px-4 py-3 text-slate-700">{log.action}</td>
-                      <td className="px-4 py-3 text-slate-700">{log.section}</td>
-                      <td className="px-4 py-3 text-slate-700">{log.description}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+
+            {/* Emergency Reset */}
+            <div className="pt-4 border-t border-slate-100">
+              <button
+                type="button"
+                className="rounded-2xl bg-rose-50 border border-rose-200 px-4 py-2.5 text-xs font-bold text-rose-700 hover:bg-rose-100 transition"
+                onClick={() => {
+                  if (window.confirm('⚠️ تحذير شديد: هل أنت متأكد من مسح جميع البيانات والتخزين المحلي للنظام بالكامل؟')) {
+                    window.localStorage.clear();
+                    window.location.reload();
+                  }
+                }}
+              >
+                ⚠️ مسح التخزين المحلي المحلي وإعادة الضبط
+              </button>
             </div>
-            {auditPagination ? <div className="mt-4">{auditPagination}</div> : null}
           </div>
         </div>
       ) : null}
 
+      {/* Toast Alert Popup */}
       {toast ? (
-        <div className={`fixed bottom-6 left-6 right-6 z-50 mx-auto max-w-md rounded-3xl px-5 py-4 text-sm font-semibold text-white ${toast.type === 'success' ? 'bg-emerald-600' : toast.type === 'warning' ? 'bg-amber-500' : 'bg-rose-500'}`}>
+        <div
+          className={`fixed bottom-6 left-6 right-6 z-50 mx-auto max-w-md rounded-2xl px-5 py-3.5 text-xs font-bold text-white shadow-2xl transition-all ${
+            toast.type === 'success' ? 'bg-emerald-600' : toast.type === 'warning' ? 'bg-amber-600' : 'bg-rose-600'
+          }`}
+        >
           {toast.message}
         </div>
       ) : null}

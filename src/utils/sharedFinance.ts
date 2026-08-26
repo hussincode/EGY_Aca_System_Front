@@ -10,6 +10,8 @@ export type FinanceEntryRecord = {
   amount: number;
   date: string;
   description?: string;
+  userName?: string;
+  userRole?: string;
 };
 
 export function recordFinanceTransaction(entry: {
@@ -23,6 +25,15 @@ export function recordFinanceTransaction(entry: {
 }) {
   if (typeof window === 'undefined') return;
 
+  let loggedUser = { name: 'مدير النظام', role: 'manager', id: '' };
+  try {
+    const raw = window.localStorage.getItem('loggedInUser');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed?.name) loggedUser = parsed;
+    }
+  } catch {}
+
   const dateStr = entry.date || new Date().toISOString().split('T')[0];
   const newRecord: FinanceEntryRecord = {
     id: `fin_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
@@ -34,6 +45,8 @@ export function recordFinanceTransaction(entry: {
     amount: Number(entry.amount) || 0,
     date: dateStr,
     description: entry.description || '',
+    userName: loggedUser.name,
+    userRole: loggedUser.role,
   };
 
   let current: FinanceEntryRecord[] = [];
@@ -58,6 +71,7 @@ export function recordFinanceTransaction(entry: {
       amount: newRecord.amount,
       date: newRecord.date,
       description: newRecord.description,
+      created_by_id: loggedUser.id || null,
     };
     if (typeof window.api.createFinance === 'function') {
       void window.api.createFinance(apiPayload);

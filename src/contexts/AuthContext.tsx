@@ -13,7 +13,7 @@ export interface AuthUser {
 // Pages each role can access
 const ROLE_PAGES: Record<UserRole, string[]> = {
   admin: ['/', '/players', '/staff', '/branches', '/ambassadors', '/leads', '/games', '/subscriptions', '/attendance', '/financ', '/store-synced', '/users', '/settings'],
-  manager: ['/', '/players', '/staff', '/branches', '/ambassadors', '/leads', '/games', '/subscriptions', '/attendance', '/financ', '/store-synced', '/settings'],
+  manager: ['/', '/players', '/staff', '/branches', '/ambassadors', '/leads', '/games', '/subscriptions', '/attendance', '/financ', '/store-synced', '/users', '/settings'],
   coach: ['/', '/players', '/games', '/subscriptions', '/attendance'],
   accountant: ['/', '/subscriptions', '/financ', '/store-synced'],
 };
@@ -21,7 +21,7 @@ const ROLE_PAGES: Record<UserRole, string[]> = {
 // Sections each role can mutate (add / edit / delete)
 const ROLE_EDITABLE: Record<UserRole, string[]> = {
   admin: ['players', 'staff', 'branches', 'ambassadors', 'leads', 'games', 'subscriptions', 'attendance', 'finance', 'users', 'settings'],
-  manager: ['players', 'staff', 'branches', 'ambassadors', 'leads', 'games', 'subscriptions', 'attendance', 'finance', 'settings'],
+  manager: ['players', 'staff', 'branches', 'ambassadors', 'leads', 'games', 'subscriptions', 'attendance', 'finance', 'users', 'settings'],
   coach: [],          // view only
   accountant: ['subscriptions', 'finance'],
 };

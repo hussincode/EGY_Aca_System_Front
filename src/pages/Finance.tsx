@@ -98,15 +98,25 @@ const emptyForm: FinanceForm = {
   description: '',
 };
 
-function normalizeFinanceFromApi(row: Record<string, unknown>): FinanceEntry | null {
+function normalizeFinanceFromApi(row: Record<string, unknown>, branchesList: Branch[] = []): FinanceEntry | null {
   if (!row) return null;
+  const bId = String(row.branch_id || row.branchId || '');
+  let bNameRaw = String(row.branchName || row.branch_name || row.branch || '');
+
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(bNameRaw)) {
+    bNameRaw = '';
+  }
+
+  const matchedBranch = branchesList.find((b) => (b.id && b.id === bId) || (b.name && b.name === bNameRaw));
+  const finalBranchName = bNameRaw || matchedBranch?.name || '';
+
   return {
     id: String(row.id || ''),
     type: (String(row.type || '') as FinanceType),
     category: String(row.category || ''),
-    branch: String(row.branch || row.branchName || ''),
-    branchId: String(row.branch_id || row.branchId || ''),
-    branchName: String(row.branchName || row.branch || ''),
+    branch: finalBranchName,
+    branchId: bId || matchedBranch?.id || '',
+    branchName: finalBranchName,
     relatedTo: String(row.related_to || row.relatedTo || ''),
     amount: Number(row.amount || 0),
     date: String(row.date || '').slice(0, 10),
@@ -153,28 +163,31 @@ export default function Finance() {
           api.getBranches?.(),
         ]);
 
-        const serverFinances = Array.isArray((resFinances as { data?: unknown[] })?.data)
-          ? ((resFinances as { data?: unknown[] }).data || [])
-          : [];
-        const mappedFinances = serverFinances
-          .map((item) => normalizeFinanceFromApi(item as Record<string, unknown>))
-          .filter((item): item is FinanceEntry => Boolean(item && item.id));
-
-        if (mappedFinances.length > 0) {
-          setFinances(mappedFinances);
-          window.localStorage.setItem('finances', JSON.stringify(mappedFinances));
-        }
-
         const serverBranches = Array.isArray((resBranches as { data?: unknown[] })?.data)
           ? ((resBranches as { data?: unknown[] }).data || [])
           : [];
+        let mappedBranches: Branch[] = [];
         if (serverBranches.length > 0) {
-          const mappedBranches = serverBranches.map((item) => {
+          mappedBranches = serverBranches.map((item) => {
             const b = item as Record<string, unknown>;
             return { id: String(b.id || ''), name: String(b.name || '') };
           });
           setBranches(mappedBranches);
           window.localStorage.setItem('branches', JSON.stringify(mappedBranches));
+        } else {
+          mappedBranches = readStoredData('branches', []);
+        }
+
+        const serverFinances = Array.isArray((resFinances as { data?: unknown[] })?.data)
+          ? ((resFinances as { data?: unknown[] }).data || [])
+          : [];
+        const mappedFinances = serverFinances
+          .map((item) => normalizeFinanceFromApi(item as Record<string, unknown>, mappedBranches))
+          .filter((item): item is FinanceEntry => Boolean(item && item.id));
+
+        if (mappedFinances.length > 0) {
+          setFinances(mappedFinances);
+          window.localStorage.setItem('finances', JSON.stringify(mappedFinances));
         }
       } catch {
         // Fallback to local storage
@@ -391,11 +404,20 @@ export default function Finance() {
       return;
     }
 
+    const matchedBranch = branches.find((b) => b.name === formData.branch || b.id === formData.branch);
+    const branchNameVal = matchedBranch?.name || formData.branch || '';
+    const branchIdVal = matchedBranch?.id || (formData.branch?.includes('-') ? formData.branch : '');
+
     const payload = {
       type: formData.type as FinanceType,
       category: formData.category,
-      branch: formData.branch,
+      branch: branchNameVal,
+      branch_id: branchIdVal || null,
+      branch_name: branchNameVal,
+      branchName: branchNameVal,
+      branchId: branchIdVal,
       relatedTo: formData.relatedTo,
+      related_to: formData.relatedTo,
       amount: Number(formData.amount),
       date: formData.date,
       description: formData.description,
@@ -411,7 +433,8 @@ export default function Finance() {
           showToast('تم تعديل الحركة بنجاح');
         } else {
           const res = await window.api.createFinance?.(payload);
-          const newEntry = (res as { data?: FinanceEntry })?.data;
+          const rawNew = (res as { data?: Record<string, unknown> })?.data;
+          const newEntry = rawNew ? normalizeFinanceFromApi(rawNew, branches) : null;
           nextFinances = [newEntry || { ...payload, id: `fin_${Date.now()}` }, ...nextFinances];
           showToast('تم إضافة الحركة بنجاح');
         }

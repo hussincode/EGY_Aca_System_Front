@@ -126,13 +126,29 @@ function matchesDay(scheduleStr: string | undefined | null, targetDayName: strin
   return s.includes(targetDayName.toLowerCase());
 }
 
+function formatDateString(val: unknown): string {
+  if (!val) return getTodayString();
+  const s = String(val).trim();
+  if (s.length >= 10 && /^\d{4}-\d{2}-\d{2}/.test(s)) {
+    return s.slice(0, 10);
+  }
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+  return s.slice(0, 10) || getTodayString();
+}
+
 function normalizeAttendanceFromDb(row: Record<string, unknown> | null | undefined): AttendanceRecord | null {
   if (!row) return null;
   return {
     id: String(row.id || ''),
     player_id: String(row.player_id || ''),
     subscription_id: String(row.subscription_id || '') || undefined,
-    date: String(row.date || getTodayString()),
+    date: formatDateString(row.date),
     status: (row.status as AttendanceRecord['status']) || 'present',
     player_name: String(row.player_name || ''),
     subscription_schedule: String(row.subscription_schedule || '') || undefined,
@@ -159,7 +175,7 @@ export default function Attendance() {
   const { canEdit } = useAuth();
   const canEditAttendance = canEdit('attendance');
 
-  const todayStr = useMemo(() => getTodayString(), []);
+  const [todayStr, setTodayStr] = useState(() => getTodayString());
   const todayDayName = useMemo(() => getArabicDayOfWeek(todayStr), [todayStr]);
 
   const [records, setRecords] = useState<AttendanceRecord[]>(() => readStorage(ATTENDANCE_KEY, []));
@@ -182,6 +198,27 @@ export default function Attendance() {
   });
 
   const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+
+  // Daily 24h Reset Timer & Window Focus Check
+  useEffect(() => {
+    const checkDayChange = () => {
+      const current = getTodayString();
+      setTodayStr((prevToday) => {
+        if (prevToday !== current) {
+          setDateFilter((prevFilter) => (prevFilter === prevToday ? current : prevFilter));
+          return current;
+        }
+        return prevToday;
+      });
+    };
+
+    const interval = setInterval(checkDayChange, 60 * 1000);
+    window.addEventListener('focus', checkDayChange);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', checkDayChange);
+    };
+  }, []);
 
   // QR Code Scanner States
   const [isScannerModalOpen, setIsScannerModalOpen] = useState(false);
@@ -678,11 +715,17 @@ export default function Attendance() {
     }
 
     const existingRecordToday = records.find(
-      (r) => r.player_id === targetPlayerId && r.date === todayStr
+      (r) =>
+        r.date === todayStr &&
+        ((r.player_id && (r.player_id === targetPlayerId || (matchedPlayer && r.player_id === matchedPlayer.id))) ||
+          (playerName && r.player_name && r.player_name.trim().toLowerCase() === playerName.trim().toLowerCase()))
     );
 
-    if (existingRecordToday && existingRecordToday.status === 'present') {
-      showToast(`ℹ️ اللاعب ${playerName} مسجل حضور بالفعل اليوم!`, 'info');
+    if (existingRecordToday) {
+      showToast(
+        `⛔ تعذّر المسح: تم تسجيل ${playerName} بالفعل اليوم (${statusLabel(existingRecordToday.status)})! يُسمح بمسح الـ QR Code مرة واحدة فقط في اليوم.`,
+        'error'
+      );
       return;
     }
 
@@ -824,9 +867,12 @@ export default function Attendance() {
             player_name: item.player_name,
             status: newStatus,
             date: item.date,
-          })) as { data?: { id?: string } };
+          })) as { data?: { id?: string; player_id?: string } };
           if (response?.data?.id) {
             newRecord.id = String(response.data.id);
+          }
+          if (response?.data?.player_id) {
+            newRecord.player_id = String(response.data.player_id);
           }
         } catch (error) {
           console.error('Failed to save attendance to API', error);

@@ -204,7 +204,7 @@ export default function Attendance() {
       const api = window.api;
 
       // Load Players for lookup
-      if (api?.getPlayers && api?.getToken?.()) {
+      if (api?.getPlayers) {
         try {
           const res = (await api.getPlayers()) as { data?: Player[] };
           if (Array.isArray(res?.data) && res.data.length > 0) {
@@ -217,7 +217,7 @@ export default function Attendance() {
       }
 
       // Load Subscriptions for schedules lookup
-      if (api?.getSubscriptions && api?.getToken?.()) {
+      if (api?.getSubscriptions) {
         try {
           const res = (await api.getSubscriptions()) as { data?: SubscriptionRecord[] };
           if (Array.isArray(res?.data) && res.data.length > 0) {
@@ -230,30 +230,20 @@ export default function Attendance() {
       }
 
       // Load Attendance Records
-      if (!api?.getAttendance || !api?.getToken?.()) {
-        setRecords(readStorage(ATTENDANCE_KEY, []));
-        return;
-      }
+      if (api?.getAttendance) {
+        try {
+          const response = (await api.getAttendance()) as { data?: unknown[] };
+          const serverRecords = Array.isArray(response?.data) ? response.data : [];
+          const mapped = serverRecords
+            .map((item) => normalizeAttendanceFromDb(item as Record<string, unknown>))
+            .filter((item): item is AttendanceRecord => Boolean(item && item.id));
 
-      try {
-        const response = (await api.getAttendance()) as { data?: unknown[] };
-        const serverRecords = Array.isArray(response?.data) ? response.data : [];
-        const mapped = serverRecords
-          .map((item) => normalizeAttendanceFromDb(item as Record<string, unknown>))
-          .filter((item): item is AttendanceRecord => Boolean(item && item.id));
-
-        if (mapped.length > 0) {
-          const localRecords = readStorage<AttendanceRecord[]>(ATTENDANCE_KEY, []);
-          const merged = [
-            ...mapped,
-            ...localRecords.filter((local) => !mapped.some((server) => server.id === local.id)),
-          ];
-          setRecords(merged);
-          saveToStorage(ATTENDANCE_KEY, merged);
+          setRecords(mapped);
+          saveToStorage(ATTENDANCE_KEY, mapped);
+        } catch (error) {
+          console.error('Failed to load attendance from API', error);
+          setRecords(readStorage(ATTENDANCE_KEY, []));
         }
-      } catch (error) {
-        console.error('Failed to load attendance from API', error);
-        setRecords(readStorage(ATTENDANCE_KEY, []));
       }
     };
 
@@ -565,7 +555,7 @@ export default function Attendance() {
     };
 
     const api = window.api;
-    if (api?.createAttendance && api?.getToken?.()) {
+    if (api?.createAttendance) {
       try {
         const response = (await api.createAttendance({
           player_id: newRecord.player_id,
@@ -707,7 +697,7 @@ export default function Attendance() {
       notes: 'تم التسجيل عن طريق QR Code 📷',
     };
 
-    if (window.api?.createAttendance && window.api?.getToken?.()) {
+    if (window.api?.createAttendance) {
       try {
         const response = (await window.api.createAttendance({
           player_id: newRecord.player_id,
@@ -765,7 +755,7 @@ export default function Attendance() {
       notes: 'تسجيل غياب تلقائي عند انتهاء اليوم',
     }));
 
-    if (window.api?.createAttendance && window.api?.getToken?.()) {
+    if (window.api?.createAttendance) {
       try {
         await Promise.all(
           newAbsenceRecords.map(async (rec) => {
@@ -800,7 +790,7 @@ export default function Attendance() {
       if (item.status === newStatus) return;
 
       const api = window.api;
-      if (api?.updateAttendance && api?.getToken?.()) {
+      if (api?.updateAttendance) {
         try {
           await api.updateAttendance(item.recordId, { status: newStatus });
         } catch (error) {
@@ -825,7 +815,7 @@ export default function Attendance() {
       };
 
       const api = window.api;
-      if (api?.createAttendance && api?.getToken?.()) {
+      if (api?.createAttendance) {
         try {
           const response = (await api.createAttendance({
             player_id: item.player_id,
@@ -855,7 +845,7 @@ export default function Attendance() {
     if (!window.confirm('هل تريد إلغاء تسجيل هذا السجل؟')) return;
 
     const api = window.api;
-    if (api?.deleteAttendance && api?.getToken?.()) {
+    if (api?.deleteAttendance) {
       try {
         await api.deleteAttendance(recordId);
       } catch (error) {

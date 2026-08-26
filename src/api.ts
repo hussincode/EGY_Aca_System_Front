@@ -319,7 +319,7 @@ const api = {
     return request<ApiResponse<Array<unknown>>>('/attendance');
   },
 
-  createAttendance(attendance: { player_id: string; status: string; date?: string; subscription_id?: string }) {
+  createAttendance(attendance: { player_id: string; status: string; date?: string; subscription_id?: string; player_name?: string }) {
     return request<ApiResponse>('/attendance', {
       method: 'POST',
       body: JSON.stringify(attendance),

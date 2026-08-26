@@ -559,6 +559,7 @@ export default function Attendance() {
       try {
         const response = (await api.createAttendance({
           player_id: newRecord.player_id,
+          player_name: newRecord.player_name,
           status: formState.status,
           date: formState.date,
         })) as { data?: { id?: string } };
@@ -701,6 +702,7 @@ export default function Attendance() {
       try {
         const response = (await window.api.createAttendance({
           player_id: newRecord.player_id,
+          player_name: newRecord.player_name,
           status: 'present',
           date: todayStr,
           subscription_id: matchedSub?.id,
@@ -819,6 +821,7 @@ export default function Attendance() {
         try {
           const response = (await api.createAttendance({
             player_id: item.player_id,
+            player_name: item.player_name,
             status: newStatus,
             date: item.date,
           })) as { data?: { id?: string } };

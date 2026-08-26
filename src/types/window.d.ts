@@ -68,7 +68,7 @@ interface WindowApi {
   deleteLead: (id: string) => Promise<unknown>;
   // Attendance
   getAttendance: () => Promise<ApiListResponse<unknown[]>>;
-  createAttendance: (attendance: { player_id: string; status: string; date?: string; subscription_id?: string }) => Promise<unknown>;
+  createAttendance: (attendance: { player_id: string; status: string; date?: string; subscription_id?: string; player_name?: string }) => Promise<unknown>;
   updateAttendance: (id: string, attendance: Record<string, any>) => Promise<unknown>;
   deleteAttendance: (id: string) => Promise<unknown>;
   // Ambassadors

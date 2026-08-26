@@ -340,7 +340,17 @@ export default function Subscriptions() {
       ctx.fillText('شكراً لاختياركم أكاديمية إيجي سبورتنج - تمرين سعيد!', width / 2, height - 40);
 
       try {
-        const qrDataUrl = await QRCode.toDataURL(currentInvoice.playerCode || '000', {
+        const qrPayload = JSON.stringify({
+          type: 'egy_sub_qr',
+          subId: currentInvoice.id,
+          playerId: currentInvoice.playerId,
+          player: currentInvoice.player,
+          code: currentInvoice.playerCode || '',
+          schedule: currentInvoice.schedule || '',
+          sessions: currentInvoice.sessions || 0,
+        });
+
+        const qrDataUrl = await QRCode.toDataURL(qrPayload, {
           width: 180,
           margin: 1,
           color: { dark: '#0f172a', light: '#ffffff' },

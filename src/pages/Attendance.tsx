@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CalendarCheck01,
   Plus,
@@ -45,6 +45,7 @@ type SubscriptionRecord = {
   branch?: string;
   status?: string;
   phone?: string;
+  sessions?: number;
 };
 
 type DisplayItem = {
@@ -182,6 +183,12 @@ export default function Attendance() {
 
   const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
 
+  // QR Code Scanner States
+  const [isScannerModalOpen, setIsScannerModalOpen] = useState(false);
+  const [scannedCodeInput, setScannedCodeInput] = useState('');
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
   // Load from API on mount
   useEffect(() => {
     const loadData = async () => {
@@ -249,11 +256,33 @@ export default function Attendance() {
     saveToStorage(ATTENDANCE_KEY, records);
   }, [records]);
 
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+        setIsCameraActive(true);
+      }
+    } catch {
+      showToast('تعذر فتح الكاميرا. يرجى استخدام القارئ أو كتابة الكود', 'info');
+    }
+  };
+
+  const stopCamera = () => {
+    if (videoRef.current && videoRef.current.srcObject) {
+      const stream = videoRef.current.srcObject as MediaStream;
+      stream.getTracks().forEach((track) => track.stop());
+      videoRef.current.srcObject = null;
+    }
+    setIsCameraActive(false);
+  };
+
   useEffect(() => {
-    if (!toast) return;
-    const timer = window.setTimeout(() => setToast(null), 2500);
-    return () => window.clearTimeout(timer);
-  }, [toast]);
+    return () => {
+      stopCamera();
+    };
+  }, []);
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToast({ message, type });
@@ -494,6 +523,179 @@ export default function Attendance() {
     showToast('تم تسجيل الحضور بنجاح', 'success');
   };
 
+  /* ── QR Code Processing Engine ────────────────────────── */
+  const processScanCode = (scannedValue: string) => {
+    if (!scannedValue || !scannedValue.trim()) return;
+
+    const raw = scannedValue.trim();
+    let subId = '';
+    let playerId = '';
+    let playerSerial = raw;
+
+    if (raw.startsWith('{') && raw.endsWith('}')) {
+      try {
+        const obj = JSON.parse(raw);
+        subId = obj.subId || '';
+        playerId = obj.playerId || '';
+        playerSerial = obj.code || obj.playerSerial || playerSerial;
+      } catch {}
+    } else if (raw.startsWith('SUB:')) {
+      const parts = raw.split(':');
+      subId = parts[1] || '';
+      playerId = parts[2] || '';
+      if (parts[3]) playerSerial = parts[3];
+    }
+
+    let matchedSub = subscriptions.find(
+      (s) => s.id === subId || (playerId && s.playerId === playerId)
+    );
+
+    let matchedPlayer = players.find(
+      (p) =>
+        (playerId && p.id === playerId) ||
+        (matchedSub && (p.id === matchedSub.playerId || p.name === matchedSub.player)) ||
+        p.playerSerial === playerSerial ||
+        p.playerBarcodeValue === playerSerial ||
+        p.id === playerSerial
+    );
+
+    if (!matchedSub && matchedPlayer) {
+      matchedSub = subscriptions.find(
+        (s) => (s.playerId === matchedPlayer.id || s.player === matchedPlayer.name) && s.status !== 'cancelled'
+      );
+    }
+
+    if (!matchedPlayer && !matchedSub) {
+      showToast(`لم يتم العثور على أي لاعب أو اشتراك بهذا الـ QR Code (${playerSerial})`, 'error');
+      return;
+    }
+
+    const playerName = matchedPlayer?.name || matchedSub?.player || 'اللاعب';
+    const targetPlayerId = matchedPlayer?.id || matchedSub?.playerId || `custom_${Date.now()}`;
+    const totalSessions = Number(matchedSub?.sessions || 0);
+
+    // RULE 1: Session Limit Check ("لو عنده تلات ايام لازم اسكان ال qr code تلات مرات بس")
+    if (matchedSub && totalSessions > 0) {
+      const currentAttendedCount = records.filter(
+        (r) =>
+          (r.subscription_id === matchedSub.id || r.player_id === targetPlayerId) &&
+          (r.status === 'present' || r.status === 'late')
+      ).length;
+
+      if (currentAttendedCount >= totalSessions) {
+        showToast(
+          `⛔ استوفى اللاعب ${playerName} كامل حصص هذا الاشتراك (${currentAttendedCount} من ${totalSessions} حصص). لا يمكن تسجيل حضور إضافي!`,
+          'error'
+        );
+        return;
+      }
+    }
+
+    // RULE 2: Scheduled Day Check ("لو عنده يوم الحد و جي في يوم تاني غيره يسال الي بيعمل scan: ده مش اليوم المحدد هل ترغب ان تسجله اليوم")
+    const scheduledDaysStr = matchedSub?.schedule || (matchedPlayer ? getPlayerScheduleStr(matchedPlayer) : '');
+    const isTodayScheduled = scheduledDaysStr ? matchesDay(scheduledDaysStr, todayDayName) : true;
+
+    if (scheduledDaysStr && !isTodayScheduled) {
+      const confirmChoice = window.confirm(
+        `⚠️ تمرين اللاعب (${playerName}) ليس محدد اليوم (${todayDayName}).\nالأيام المحددة للاعب: (${scheduledDaysStr})\n\nده مش اليوم المحدد هل ترغب ان تسجله اليوم؟`
+      );
+      if (!confirmChoice) {
+        showToast(`تم التراجع عن تسجيل حضور ${playerName}`, 'info');
+        return;
+      }
+    }
+
+    const existingRecordToday = records.find(
+      (r) => r.player_id === targetPlayerId && r.date === todayStr
+    );
+
+    if (existingRecordToday && existingRecordToday.status === 'present') {
+      showToast(`ℹ️ اللاعب ${playerName} مسجل حضور بالفعل اليوم!`, 'info');
+      return;
+    }
+
+    const newRecord: AttendanceRecord = {
+      id: existingRecordToday?.id || `att_${Date.now()}`,
+      player_id: targetPlayerId,
+      subscription_id: matchedSub?.id,
+      player_name: playerName,
+      phone: matchedPlayer?.phone,
+      subscription_schedule: scheduledDaysStr,
+      status: 'present',
+      date: todayStr,
+      notes: 'تم التسجيل عن طريق QR Code 📷',
+    };
+
+    if (window.api?.createAttendance && window.api?.getToken?.()) {
+      void window.api.createAttendance({
+        player_id: newRecord.player_id,
+        status: 'present',
+        date: todayStr,
+        subscription_id: matchedSub?.id,
+      });
+    }
+
+    setRecords((prev) => {
+      const next = [newRecord, ...prev.filter((r) => !(r.player_id === targetPlayerId && r.date === todayStr))];
+      saveToStorage(ATTENDANCE_KEY, next);
+      return next;
+    });
+
+    const attendedSoFar = records.filter(r => (r.subscription_id === matchedSub?.id || r.player_id === targetPlayerId) && (r.status === 'present' || r.status === 'late')).length + 1;
+    const sessionBadge = totalSessions > 0 ? ` (حصة ${attendedSoFar} من ${totalSessions})` : '';
+
+    showToast(`✅ تم تسجيل حضور ${playerName} بنجاح!${sessionBadge}`, 'success');
+    setScannedCodeInput('');
+  };
+
+  /* ── Automatic Absence Engine ─────────────────────────── */
+  const handleAutoAbsenceUnrecorded = () => {
+    const targetDate = dateFilter === 'all' ? todayStr : dateFilter;
+    const unrecordedItems = displayItems.filter((item) => item.status === 'unrecorded');
+
+    if (unrecordedItems.length === 0) {
+      showToast('لا يوجد لاعبين متبقيين بدون تسجيل لهذا اليوم', 'info');
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `هل تريد تسجيل غياب تلقائي لجميع اللاعبين المتبقين بدون تسجيل (${unrecordedItems.length} لاعب) بتاريخ ${targetDate}؟`
+      )
+    ) {
+      return;
+    }
+
+    const newAbsenceRecords: AttendanceRecord[] = unrecordedItems.map((item) => ({
+      id: `att_absent_${item.player_id}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      player_id: item.player_id,
+      player_name: item.player_name,
+      phone: item.phone,
+      subscription_schedule: item.schedule,
+      status: 'absent',
+      date: targetDate,
+      notes: 'تسجيل غياب تلقائي عند انتهاء اليوم',
+    }));
+
+    if (window.api?.createAttendance && window.api?.getToken?.()) {
+      newAbsenceRecords.forEach((rec) => {
+        void window.api.createAttendance({
+          player_id: rec.player_id,
+          status: 'absent',
+          date: rec.date,
+        });
+      });
+    }
+
+    setRecords((prev) => {
+      const next = [...newAbsenceRecords, ...prev];
+      saveToStorage(ATTENDANCE_KEY, next);
+      return next;
+    });
+
+    showToast(`تم تسجيل غياب تلقائي لـ ${unrecordedItems.length} لاعب بنجاح 📋`, 'success');
+  };
+
   const handleSetStatus = async (item: DisplayItem, newStatus: AttendanceRecord['status']) => {
     if (!canEditAttendance) return;
 
@@ -614,16 +816,34 @@ export default function Attendance() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {canEditAttendance && (
-              <button
-                type="button"
-                onClick={openAddModal}
-                className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700"
-              >
-                <Plus className="h-4 w-4" />
-                تسجيل حضور يدوي
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => setIsScannerModalOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700"
+                >
+                  <span>📷</span>
+                  مسح QR Code للحضور
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAutoAbsenceUnrecorded}
+                  className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs font-bold text-rose-700 transition hover:bg-rose-100"
+                >
+                  <span>⚠️</span>
+                  تسجيل غياب تلقائي للمتبقين ({unrecordedCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={openAddModal}
+                  className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700"
+                >
+                  <Plus className="h-4 w-4" />
+                  تسجيل حضور يدوي
+                </button>
+              </>
             )}
             <button
               type="button"
@@ -1064,6 +1284,108 @@ export default function Attendance() {
                 className="rounded-xl bg-sky-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-sky-700 transition"
               >
                 حفظ السجل
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* ── QR Code Scanner Modal ── */}
+      {isScannerModalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl space-y-4">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-3">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                  <span>📷</span>
+                  مسح QR Code الفاتورة للحضور
+                </h2>
+                <p className="text-xs text-slate-500">وجه قارئ الباركود أو الكاميرا نحو كود الفاتورة لتسجيل الحضور فوراً</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  stopCamera();
+                  setIsScannerModalOpen(false);
+                }}
+                className="text-slate-400 hover:text-slate-800 text-2xl font-bold"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Input Box for Hardware Barcode / Scanner */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                processScanCode(scannedCodeInput);
+              }}
+              className="space-y-2"
+            >
+              <label className="text-xs font-semibold text-slate-700 block">
+                ادخل الكود أو وجه قارئ الباركود / الـ QR:
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  autoFocus
+                  value={scannedCodeInput}
+                  onChange={(e) => setScannedCodeInput(e.target.value)}
+                  placeholder="امسح الـ QR أو اكتب كود الفاتورة..."
+                  className="w-full rounded-xl border border-sky-300 bg-sky-50/50 px-3 py-2.5 text-right text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
+                />
+                <button
+                  type="submit"
+                  className="rounded-xl bg-sky-600 px-4 py-2.5 text-xs font-bold text-white transition hover:bg-sky-700 whitespace-nowrap"
+                >
+                  تأكيد ↵
+                </button>
+              </div>
+            </form>
+
+            {/* Video Feed Component */}
+            <div className="rounded-xl border border-slate-200 bg-slate-950 p-3 text-center overflow-hidden">
+              <video ref={videoRef} className="w-full max-h-52 rounded-lg object-cover mx-auto bg-slate-900" />
+              <div className="mt-2 flex items-center justify-center gap-3">
+                {!isCameraActive ? (
+                  <button
+                    type="button"
+                    onClick={startCamera}
+                    className="rounded-xl bg-emerald-600 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700"
+                  >
+                    فتح الكاميرا 📹
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={stopCamera}
+                    className="rounded-xl bg-rose-600 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-rose-700"
+                  >
+                    إيقاف الكاميرا 🛑
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-xl bg-slate-50 p-3 text-[11px] text-slate-600 space-y-1">
+              <p className="font-bold text-slate-800">📌 قواعد الحضور بالفحص:</p>
+              <ul className="list-disc pr-4 space-y-1">
+                <li>يتم خصم حصة واحدة من إجمالي حصص اشتراك اللاعب مع كل فحص.</li>
+                <li>عند استهلاك كامل الحصص، يمنع النظام التسجيل الإضافي لمنع التجاوز.</li>
+                <li>في حال كان اليوم الحالي مخالفاً ليوم تمرين اللاعب، يطلب النظام تأكيد المسؤول أولاً.</li>
+              </ul>
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => {
+                  stopCamera();
+                  setIsScannerModalOpen(false);
+                }}
+                className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                إغلاق
               </button>
             </div>
           </div>

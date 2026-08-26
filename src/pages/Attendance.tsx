@@ -591,7 +591,7 @@ export default function Attendance() {
   };
 
   /* ── QR Code Processing Engine ────────────────────────── */
-  const processScanCode = (scannedValue: string) => {
+  const processScanCode = async (scannedValue: string) => {
     if (!scannedValue || !scannedValue.trim()) return;
 
     const raw = scannedValue.trim();
@@ -708,12 +708,19 @@ export default function Attendance() {
     };
 
     if (window.api?.createAttendance && window.api?.getToken?.()) {
-      void window.api.createAttendance({
-        player_id: newRecord.player_id,
-        status: 'present',
-        date: todayStr,
-        subscription_id: matchedSub?.id,
-      });
+      try {
+        const response = (await window.api.createAttendance({
+          player_id: newRecord.player_id,
+          status: 'present',
+          date: todayStr,
+          subscription_id: matchedSub?.id,
+        })) as { data?: { id?: string } };
+        if (response?.data?.id) {
+          newRecord.id = String(response.data.id);
+        }
+      } catch (err) {
+        console.error('Failed to create attendance via QR on API', err);
+      }
     }
 
     setRecords((prev) => {
@@ -730,7 +737,7 @@ export default function Attendance() {
   };
 
   /* ── Automatic Absence Engine ─────────────────────────── */
-  const handleAutoAbsenceUnrecorded = () => {
+  const handleAutoAbsenceUnrecorded = async () => {
     const targetDate = dateFilter === 'all' ? todayStr : dateFilter;
     const unrecordedItems = displayItems.filter((item) => item.status === 'unrecorded');
 
@@ -759,13 +766,22 @@ export default function Attendance() {
     }));
 
     if (window.api?.createAttendance && window.api?.getToken?.()) {
-      newAbsenceRecords.forEach((rec) => {
-        void window.api.createAttendance({
-          player_id: rec.player_id,
-          status: 'absent',
-          date: rec.date,
-        });
-      });
+      try {
+        await Promise.all(
+          newAbsenceRecords.map(async (rec) => {
+            const res = (await window.api.createAttendance({
+              player_id: rec.player_id,
+              status: 'absent',
+              date: rec.date,
+            })) as { data?: { id?: string } };
+            if (res?.data?.id) {
+              rec.id = String(res.data.id);
+            }
+          })
+        );
+      } catch (err) {
+        console.error('Failed to save auto-absence records to API', err);
+      }
     }
 
     setRecords((prev) => {

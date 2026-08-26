@@ -11,10 +11,9 @@
       "vite/client"
     ],
     "ignoreDeprecations": "5.0",
-    "baseUrl": "./",
     "paths": {
       "@/*": [
-        "src/*"
+        "./src/*"
       ]
     },
     "skipLibCheck": true,

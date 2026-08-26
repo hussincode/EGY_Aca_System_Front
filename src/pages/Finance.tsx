@@ -122,7 +122,7 @@ export default function Finance() {
   const [branches, setBranches] = useState<Branch[]>(() => readStoredData('branches', []));
 
   const [search, setSearch] = useState('');
-  const [filterMonth, setFilterMonth] = useState('');
+  const [filterMonth] = useState('');
   const [filterType, setFilterType] = useState<FinanceType | ''>('');
   const [filterBranch, setFilterBranch] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
@@ -635,7 +635,7 @@ export default function Finance() {
                   <XAxis dataKey="name" stroke="#94a3b8" fontSize={11} tickLine={false} />
                   <YAxis stroke="#94a3b8" fontSize={11} tickLine={false} tickFormatter={(v) => `${v}`} />
                   <RechartsTooltip
-                    formatter={(value: number) => [`${value.toLocaleString()} ج.م`, '']}
+                    formatter={(value: any) => [`${Number(value || 0).toLocaleString()} ج.م`, '']}
                     contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b', borderRadius: '12px', color: '#fff', fontSize: '12px' }}
                   />
                   <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '8px' }} />

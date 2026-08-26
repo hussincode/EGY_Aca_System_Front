@@ -85,11 +85,6 @@ function readStoredData<T>(key: string, fallback: T): T {
 function formatMoney(value: number) {
   return `${value.toLocaleString('en-US')} ج.م`;
 }
-
-function getFinanceWindow(): typeof window & { sharedFinance?: { addFinance: (type: 'income' | 'expense', amount: number, category: string, branch: string, description: string, date: string) => void } } {
-  return window as typeof window & { sharedFinance?: { addFinance: (type: 'income' | 'expense', amount: number, category: string, branch: string, description: string, date: string) => void } };
-}
-
 function createStableId(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }

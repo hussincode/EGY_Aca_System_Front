@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Bell03, SearchSm, Phone01, CalendarCheck01, Gift02, Plus, Trash01 } from '@untitledui/icons';
 import AppIcon from '@/components/AppIcon';
 import Pagination from '@/components/Pagination';
@@ -581,22 +581,6 @@ export default function Players() {
     link.click();
     URL.revokeObjectURL(url);
   };
-
-  const headRow = (
-    <tr>
-      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">الاسم</th>
-      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">العمر</th>
-      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">رقم الهاتف</th>
-      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">اللعبة</th>
-      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">الفرع</th>
-      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">نسبة الحضور</th>
-      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">السفير</th>
-      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">النقاط</th>
-      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">المكافآت</th>
-      <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-500">الإجراءات</th>
-    </tr>
-  );
-
   const { canEdit } = useAuth();
   const canEditPlayers = canEdit('players');
 

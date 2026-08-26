@@ -3,10 +3,8 @@ import {
   CalendarCheck01,
   Plus,
   SearchSm,
-  Calendar,
   Clock,
   Trash01,
-  User01,
 } from '@untitledui/icons';
 import AppIcon from '@/components/AppIcon';
 import Pagination from '@/components/Pagination';

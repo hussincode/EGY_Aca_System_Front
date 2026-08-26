@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
-import { Plus, SearchSm, Phone01, Trash01, User01, CalendarCheck01 } from '@untitledui/icons';
+import { Plus, SearchSm, Phone01, Trash01, User01 } from '@untitledui/icons';
 import AppIcon from '@/components/AppIcon';
 import Pagination from '@/components/Pagination';
 import { useAuth } from '@/contexts/AuthContext';
@@ -28,22 +28,6 @@ type StaffFormState = {
   revenue: number;
 };
 
-type FinanceRecord = {
-  source?: string;
-  sourceMonth?: string;
-};
-
-type SharedFinanceApi = {
-  getFinances: () => FinanceRecord[];
-  setFinances: (records: FinanceRecord[]) => void;
-  addFinance?: (...args: unknown[]) => void;
-};
-
-declare global {
-  interface Window {
-    sharedFinance?: SharedFinanceApi;
-  }
-}
 
 const initialFormState: StaffFormState = {
   name: '',

@@ -730,7 +730,7 @@ export default function Attendance() {
     }
 
     const newRecord: AttendanceRecord = {
-      id: existingRecordToday?.id || `att_${Date.now()}`,
+      id: `att_${Date.now()}`,
       player_id: targetPlayerId,
       subscription_id: matchedSub?.id,
       player_name: playerName,

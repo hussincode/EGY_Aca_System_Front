@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Gift02, SearchSm } from '@untitledui/icons';
 import AppIcon from '@/components/AppIcon';
+import Pagination from '@/components/Pagination';
 import type { Ambassador, ReferredPlayer } from '../types/ambassador';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -172,6 +173,19 @@ export default function Ambassadors() {
       return matchesSearch && matchesStatus;
     });
   }, [ambassadorRows, filterStatus, search]);
+
+  const [currentPage, setCurrentPage] = useState(1);
+  const rowsPerPage = 10;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, filterStatus]);
+
+  const totalPages = Math.ceil(filteredAmbassadors.length / rowsPerPage) || 1;
+  const paginatedAmbassadors = useMemo(() => {
+    const start = (currentPage - 1) * rowsPerPage;
+    return filteredAmbassadors.slice(start, start + rowsPerPage);
+  }, [filteredAmbassadors, currentPage]);
 
   const metrics = useMemo(() => {
     return ambassadorRows.reduce(
@@ -469,8 +483,8 @@ export default function Ambassadors() {
                 </tr>
               </thead>
               <tbody>
-                {filteredAmbassadors.length > 0 ? (
-                  filteredAmbassadors.map((amb, index) => (
+                {paginatedAmbassadors.length > 0 ? (
+                  paginatedAmbassadors.map((amb, index) => (
                     <tr key={amb.RefCode} className="border-b border-border last:border-b-0 hover:bg-slate-50">
                       <td className="px-4 py-3 font-semibold text-text-primary">{amb.AmbName}</td>
                       <td className="px-4 py-3 text-text-secondary">{amb.AmbPhone}</td>
@@ -536,6 +550,15 @@ export default function Ambassadors() {
             </table>
           </div>
         </section>
+
+        {/* ── Pagination Bar ── */}
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={filteredAmbassadors.length}
+          onPageChange={setCurrentPage}
+          label="سفير"
+        />
       </div>
 
       {isModalOpen && (

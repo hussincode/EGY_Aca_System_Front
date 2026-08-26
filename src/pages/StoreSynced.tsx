@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { recordFinanceTransaction } from '@/utils/sharedFinance';
 
 type Product = {
   id: string;
@@ -157,11 +158,17 @@ export default function StoreSynced() {
     const nextSales = [...sales];
     persistStoreData(nextProducts, nextSales);
 
-    const finance = getFinanceWindow().sharedFinance;
-    finance?.addFinance('expense', totalCost, 'مشتريات متجر', branch, `شراء ${qty} من ${name}`, new Date().toISOString().split('T')[0]);
+    recordFinanceTransaction({
+      type: 'expense',
+      amount: totalCost,
+      category: 'مشتريات متجر',
+      branch,
+      description: `شراء ${qty} من ${name}`,
+      date: new Date().toISOString().split('T')[0],
+    });
 
     setProductForm(initialProductForm);
-    showToast('تمت إضافة المنتج للمخزون وتسجيل التكلفة كمصروفات', 'success');
+    showToast('تمت إضافة المنتج للمخزون وتسجيل التكلفة كمصروفات بالماليات', 'success');
   };
 
   const sellProduct = () => {
@@ -201,11 +208,17 @@ export default function StoreSynced() {
 
     persistStoreData(nextProducts, nextSales);
 
-    const finance = getFinanceWindow().sharedFinance;
-    finance?.addFinance('income', revenue, 'مبيعات متجر', branch, `بيع ${qtyToSell} من ${product.name}`, today);
+    recordFinanceTransaction({
+      type: 'income',
+      amount: revenue,
+      category: 'مبيعات متجر',
+      branch,
+      description: `بيع ${qtyToSell} من ${product.name}`,
+      date: today,
+    });
 
     setSaleForm(initialSaleForm);
-    showToast(`تم البيع وتسجيل الإيراد (${revenue} ج.م) بنجاح`, 'success');
+    showToast(`تم البيع وتسجيل الإيراد (${revenue} ج.م) بالماليات بنجاح`, 'success');
   };
 
   const deleteProduct = (id: string) => {
@@ -226,39 +239,61 @@ export default function StoreSynced() {
     });
   };
 
-  const saveEditedProduct = () => {
-    if (!editProductForm) return;
-    const nextProducts = products.map((product) =>
-      product.id === editProductForm.id
-        ? {
-            ...product,
-            name: editProductForm.name,
-            cost: Number(editProductForm.costPrice),
-            sell: Number(editProductForm.sellPrice),
-            qty: Number(editProductForm.qty),
-            minStock: Number(editProductForm.minStock),
-          }
-        : product,
-    );
-    persistStoreData(nextProducts, sales);
-    setEditProductForm(null);
-    showToast('تم تعديل المنتج', 'success');
-  };
+    const saveEditedProduct = () => {
+      if (!editProductForm) return;
+      const oldProduct = products.find((product) => product.id === editProductForm.id);
+      const newQty = Number(editProductForm.qty);
+      const costPrice = Number(editProductForm.costPrice);
+      const addedQty = newQty - (oldProduct?.qty || 0);
 
-  const deleteSale = (index: number) => {
-    if (!window.confirm('هل أنت متأكد من حذف عملية البيع؟ سيتم استرجاع الكمية للمخزون.')) return;
-    const sale = sales[index];
-    const nextProducts = products.map((product) =>
-      product.id === sale.productId ? { ...product, qty: Number(product.qty) + Number(sale.qty) } : product,
-    );
-    const nextSales = sales.filter((_, itemIndex) => itemIndex !== index);
-    persistStoreData(nextProducts, nextSales);
+      const nextProducts = products.map((product) =>
+        product.id === editProductForm.id
+          ? {
+              ...product,
+              name: editProductForm.name,
+              cost: costPrice,
+              sell: Number(editProductForm.sellPrice),
+              qty: newQty,
+              minStock: Number(editProductForm.minStock),
+            }
+          : product,
+      );
+      persistStoreData(nextProducts, sales);
 
-    const finance = getFinanceWindow().sharedFinance;
-    finance?.addFinance('expense', Number(sale.sell) * Number(sale.qty), 'استرجاع بيع', sale.branch, `إلغاء بيع ${sale.qty} من ${sale.name}`, new Date().toISOString().split('T')[0]);
+      if (addedQty > 0 && costPrice > 0) {
+        recordFinanceTransaction({
+          type: 'expense',
+          amount: addedQty * costPrice,
+          category: 'مشتريات متجر',
+          branch: oldProduct?.branch || '',
+          description: `شراء كمية إضافية (${addedQty}) من ${editProductForm.name}`,
+        });
+      }
 
-    showToast('تم حذف عملية البيع واسترجاع الكمية', 'success');
-  };
+      setEditProductForm(null);
+      showToast('تم تعديل المنتج وتسجيل تكلفة الزيادة بالماليات', 'success');
+    };
+
+    const deleteSale = (index: number) => {
+      if (!window.confirm('هل أنت متأكد من حذف عملية البيع؟ سيتم استرجاع الكمية للمخزون.')) return;
+      const sale = sales[index];
+      const nextProducts = products.map((product) =>
+        product.id === sale.productId ? { ...product, qty: Number(product.qty) + Number(sale.qty) } : product,
+      );
+      const nextSales = sales.filter((_, itemIndex) => itemIndex !== index);
+      persistStoreData(nextProducts, nextSales);
+
+      recordFinanceTransaction({
+        type: 'expense',
+        amount: Number(sale.sell) * Number(sale.qty),
+        category: 'استرجاع بيع',
+        branch: sale.branch,
+        description: `إلغاء بيع ${sale.qty} من ${sale.name}`,
+        date: new Date().toISOString().split('T')[0],
+      });
+
+      showToast('تم حذف عملية البيع واسترجاع الكمية وتسجيل الاسترجاع بالماليات', 'success');
+    };
 
   const openEditSaleModal = (index: number) => {
     const sale = sales[index];
@@ -277,6 +312,10 @@ export default function StoreSynced() {
     }
 
     const sale = sales[editingSaleIndex];
+    const oldRevenue = Number(sale.sell) * Number(sale.qty);
+    const newRevenue = newPrice * newQty;
+    const diff = newRevenue - oldRevenue;
+
     const qtyDiff = Number(sale.qty) - newQty;
     const nextProducts = products.map((product) => {
       if (product.id !== sale.productId) return product;
@@ -300,9 +339,28 @@ export default function StoreSynced() {
     );
 
     persistStoreData(nextProducts, nextSales);
+
+    if (diff > 0) {
+      recordFinanceTransaction({
+        type: 'income',
+        amount: diff,
+        category: 'مبيعات متجر',
+        branch: sale.branch,
+        description: `تعديل بيع (مبلغ إضافي): ${sale.name}`,
+      });
+    } else if (diff < 0) {
+      recordFinanceTransaction({
+        type: 'expense',
+        amount: Math.abs(diff),
+        category: 'استرجاع بيع',
+        branch: sale.branch,
+        description: `تعديل بيع (خصم مبلغ): ${sale.name}`,
+      });
+    }
+
     setEditingSaleIndex(null);
     setEditSaleForm(null);
-    showToast('تم تعديل عملية البيع', 'success');
+    showToast('تم تعديل عملية البيع ومزامنتها مع الماليات', 'success');
   };
 
   const availableProducts = useMemo(() => {

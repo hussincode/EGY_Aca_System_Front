@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Plus, SearchSm, Phone01, Trash01, User01, MessageChatCircle } from '@untitledui/icons';
+import AppIcon from '@/components/AppIcon';
 import { useAuth } from '@/contexts/AuthContext';
 
 type LeadStatus = 'new' | 'contact' | 'trial' | 'interested' | 'not' | 'convert';
@@ -99,169 +101,180 @@ function normalizeLead(lead: Partial<Lead> & { id?: string }): Lead {
 
 function normalizeLeadFromDb(row: Record<string, unknown> | null | undefined): Lead | null {
   if (!row) return null;
-  const id = String(row.id || '');
-  if (!id) return null;
-  return {
-    id,
+  return normalizeLead({
+    id: String(row.id || ''),
     name: String(row.name || ''),
+    parent: String(row.parent || ''),
     phone: String(row.phone || ''),
-    sport: String(row.interest || ''),
-    branch: String((row as Record<string, unknown>).branch_name || ''),
+    sport: String(row.interest || row.sport || ''),
+    branch: String(row.branch_name || row.branch || ''),
     branch_id: String(row.branch_id || ''),
+    source: String(row.source || ''),
+    score: (row.score as LeadScore) || 'hot',
+    followDate: String(row.followDate || ''),
     notes: String(row.notes || ''),
     status: (row.status as LeadStatus) || 'new',
-    parent: '',
-    age: '',
-    source: '',
-    score: 'hot',
-    followDate: '',
-    tags: [],
     created_at: String(row.created_at || ''),
-  };
-}
-
-function getScoreLabel(score?: LeadScore) {
-  return {
-    hot: 'ساخن',
-    mid: 'متوسط',
-    cold: 'بارد',
-  }[score || 'cold'];
+  });
 }
 
 function getStatusLabel(status?: LeadStatus) {
-  return {
-    new: 'جديد',
-    contact: 'تم التواصل',
-    trial: 'حجز تجربة',
-    interested: 'مهتم',
-    not: 'غير مهتم',
-    convert: 'تم التحويل',
-  }[status || 'new'];
+  switch (status) {
+    case 'new':
+      return 'جديد';
+    case 'contact':
+      return 'تم التواصل';
+    case 'trial':
+      return 'تمرين تجريبي';
+    case 'interested':
+      return 'مهتم جداً';
+    case 'not':
+      return 'غير مهتم';
+    case 'convert':
+      return 'تم التحويل للاعب';
+    default:
+      return 'جديد';
+  }
 }
 
-function getStatusClasses(status?: LeadStatus) {
+function getStatusBadgeStyle(status?: LeadStatus) {
   switch (status) {
-    case 'convert':
-      return 'bg-emerald-100 text-emerald-700';
-    case 'interested':
-      return 'bg-sky-100 text-sky-700';
-    case 'trial':
-      return 'bg-violet-100 text-violet-700';
+    case 'new':
+      return 'bg-sky-50 text-sky-700 border-sky-200';
     case 'contact':
-      return 'bg-amber-100 text-amber-700';
+      return 'bg-blue-50 text-blue-700 border-blue-200';
+    case 'trial':
+      return 'bg-purple-50 text-purple-700 border-purple-200';
+    case 'interested':
+      return 'bg-amber-50 text-amber-700 border-amber-200';
     case 'not':
-      return 'bg-rose-100 text-rose-700';
+      return 'bg-slate-100 text-slate-600 border-slate-200';
+    case 'convert':
+      return 'bg-emerald-50 text-emerald-700 border-emerald-200';
     default:
-      return 'bg-slate-100 text-slate-700';
+      return 'bg-slate-100 text-slate-600 border-slate-200';
   }
 }
 
 export default function Leads() {
+  const navigate = useNavigate();
   const { canEdit } = useAuth();
   const canEditLeads = canEdit('leads');
-  const navigate = useNavigate();
-  const [leads, setLeads] = useState<Lead[]>(() => readStoredData(LEADS_KEY, []).map(normalizeLead));
-  const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [branchFilter, setBranchFilter] = useState('');
-  const [tagFilter, setTagFilter] = useState('');
-  const [bulkBranch, setBulkBranch] = useState('');
-  const [bulkMessage, setBulkMessage] = useState('');
-  const [bulkStatus, setBulkStatus] = useState('');
+
+  const [leads, setLeads] = useState<Lead[]>(() => {
+    const raw = readStoredData<unknown[]>(LEADS_KEY, []);
+    return raw.map((item) => normalizeLead(item as Partial<Lead>));
+  });
+
+  const [branches, setBranches] = useState<Array<{ id: string; name: string }>>(() =>
+    readStoredData(BRANCHES_KEY, [])
+  );
+
+  const [search, setSearch] = useState('');
+  const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [filterScore, setFilterScore] = useState<string>('all');
+  const [filterBranch, setFilterBranch] = useState<string>('all');
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>('table');
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingLeadId, setEditingLeadId] = useState<string | null>(null);
   const [formState, setFormState] = useState<LeadFormState>(initialFormState);
-  const [isSendingBulk, setIsSendingBulk] = useState(false);
 
-  // Load leads from API on mount
+  const [bulkBranch, setBulkBranch] = useState('');
+  const [bulkMessage, setBulkMessage] = useState('');
+  const [isSendingBulk, setIsSendingBulk] = useState(false);
+  const [bulkStatus, setBulkStatus] = useState('');
+
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
+
+  // Load from API on mount
   useEffect(() => {
-    const loadLeads = async () => {
+    const loadData = async () => {
       const api = window.api;
+
+      if (api?.getBranches && api?.getToken?.()) {
+        try {
+          const res = (await api.getBranches()) as { data?: Array<{ id: string; name: string }> };
+          if (Array.isArray(res?.data) && res.data.length) {
+            setBranches(res.data);
+            window.localStorage.setItem(BRANCHES_KEY, JSON.stringify(res.data));
+          }
+        } catch {
+          // fallback
+        }
+      }
+
       if (!api?.getLeads || !api?.getToken?.()) {
-        // No API available, use localStorage
-        setLeads(readStoredData(LEADS_KEY, []).map(normalizeLead));
         return;
       }
 
       try {
-        const response = await api.getLeads();
+        const response = (await api.getLeads()) as { data?: unknown[] };
         const serverLeads = Array.isArray(response?.data) ? response.data : [];
         const mapped = serverLeads
-          .map((item: unknown) => normalizeLeadFromDb(item as Record<string, unknown>))
-          .filter((item): item is Lead => Boolean(item));
-        
+          .map((item) => normalizeLeadFromDb(item as Record<string, unknown>))
+          .filter((item): item is Lead => Boolean(item && item.id));
+
         if (mapped.length > 0) {
-          // Merge with localStorage data
-          const localLeads = readStoredData<Lead[]>(LEADS_KEY, []);
-          const merged = [...mapped, ...localLeads.filter(
-            (local) => !mapped.some((server) => server.id === local.id)
-          )];
+          const localLeads = readStoredData<unknown[]>(LEADS_KEY, []).map((item) =>
+            normalizeLead(item as Partial<Lead>)
+          );
+          const merged = [
+            ...mapped,
+            ...localLeads.filter((local) => !mapped.some((server) => server.id === local.id)),
+          ];
           setLeads(merged);
           window.localStorage.setItem(LEADS_KEY, JSON.stringify(merged));
         }
-      } catch (error) {
-        console.error('Failed to load leads from API', error);
-        setLeads(readStoredData(LEADS_KEY, []).map(normalizeLead));
+      } catch {
+        // fallback
       }
     };
 
-    loadLeads();
+    loadData();
   }, []);
 
-  // Sync to localStorage whenever leads change
   useEffect(() => {
-    window.localStorage.setItem(LEADS_KEY, JSON.stringify(leads));
-  }, [leads]);
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), 2500);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
 
-  useEffect(() => {
-    const onStorage = () => {
-      const stored = readStoredData<Partial<Lead>[]>(LEADS_KEY, []);
-      setLeads(stored.map(normalizeLead));
-    };
-    window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
-  }, []);
-
-  const branchOptions = useMemo(() => {
-    return [...new Set(leads.map((lead) => lead.branch).filter(Boolean))] as string[];
-  }, [leads]);
-
-  const filteredLeads = useMemo(() => {
-    const search = searchTerm.trim().toLowerCase();
-    const tag = tagFilter.trim().toLowerCase();
-
-    return leads.filter((lead) => {
-      const leadName = (lead.name || '').toLowerCase();
-      const leadTags = (lead.tags || []).join(',').toLowerCase();
-      const matchesSearch = !search || leadName.includes(search) || (lead.phone || '').includes(search);
-      const matchesStatus = !statusFilter || lead.status === statusFilter;
-      const matchesBranch = !branchFilter || lead.branch === branchFilter;
-      const matchesTag = !tag || leadTags.includes(tag);
-      return matchesSearch && matchesStatus && matchesBranch && matchesTag;
-    });
-  }, [branchFilter, leads, searchTerm, statusFilter, tagFilter]);
-
-  const stats = useMemo(() => {
-    return leads.reduce(
-      (acc, lead) => {
-        acc.total += 1;
-        if (lead.status === 'new') acc.newCount += 1;
-        if (lead.status === 'interested') acc.intCount += 1;
-        if (lead.status === 'convert') acc.convCount += 1;
-        if (lead.score === 'hot') acc.hotCount += 1;
-        return acc;
-      },
-      { total: 0, newCount: 0, intCount: 0, convCount: 0, hotCount: 0 },
-    );
-  }, [leads]);
-
-  const resetModal = () => {
-    setFormState(initialFormState);
-    setEditingLeadId(null);
+  const showToast = (message: string, type: 'success' | 'error' | 'warning' = 'success') => {
+    setToast({ message, type });
   };
 
+  const filteredLeads = useMemo(() => {
+    return leads.filter((lead) => {
+      const term = search.trim().toLowerCase();
+      const matchesSearch =
+        !term ||
+        lead.name.toLowerCase().includes(term) ||
+        (lead.parent || '').toLowerCase().includes(term) ||
+        (lead.phone || '').includes(term) ||
+        (lead.sport || '').toLowerCase().includes(term) ||
+        (lead.notes || '').toLowerCase().includes(term);
+
+      const matchesStatus = filterStatus === 'all' || lead.status === filterStatus;
+      const matchesScore = filterScore === 'all' || lead.score === filterScore;
+      const matchesBranch = filterBranch === 'all' || lead.branch === filterBranch;
+
+      return matchesSearch && matchesStatus && matchesScore && matchesBranch;
+    });
+  }, [leads, search, filterStatus, filterScore, filterBranch]);
+
+  const stats = useMemo(() => {
+    const total = leads.length;
+    const newCount = leads.filter((item) => item.status === 'new').length;
+    const intCount = leads.filter((item) => item.status === 'interested').length;
+    const convCount = leads.filter((item) => item.status === 'convert').length;
+    const hotCount = leads.filter((item) => item.score === 'hot').length;
+    return { total, newCount, intCount, convCount, hotCount };
+  }, [leads]);
+
   const openAddModal = () => {
-    resetModal();
+    setEditingLeadId(null);
+    setFormState(initialFormState);
     setIsModalOpen(true);
   };
 
@@ -285,70 +298,67 @@ export default function Leads() {
 
   const closeModal = () => {
     setIsModalOpen(false);
-    resetModal();
+    setEditingLeadId(null);
+    setFormState(initialFormState);
   };
 
-  const resolveBranchId = (branchName: string): string | null => {
-    if (!branchName) return null;
-    const branches = readStoredData<Array<{ id: string; name: string }>>(BRANCHES_KEY, []);
-    const found = branches.find((b) => b.name === branchName);
-    return found?.id || null;
-  };
-
-  const saveLeadToDb = async (lead: Lead): Promise<boolean> => {
+  const saveLeadToDb = async (leadData: Lead) => {
     const api = window.api;
-    if (!api?.createLead || !api?.updateLead || !api?.getToken?.()) return false;
+    if (!api?.getToken?.()) return;
 
     try {
-      const payload = {
-        name: lead.name,
-        phone: lead.phone || '',
-        interest: lead.sport || '',
-        status: lead.status || 'new',
-        branch_id: resolveBranchId(lead.branch || '') || undefined,
-        notes: [lead.source ? `المصدر: ${lead.source}` : '', lead.parent ? `ولي الأمر: ${lead.parent}` : '', lead.age ? `العمر: ${lead.age}` : '', lead.score ? `التقييم: ${lead.score}` : '', lead.followDate ? `متابعة: ${lead.followDate}` : '', lead.tags?.length ? `Tags: ${lead.tags.join(', ')}` : ''].filter(Boolean).join('\n'),
-      };
-
-      if (editingLeadId) {
-        await api.updateLead(lead.id, payload);
-      } else {
-        await api.createLead(payload);
+      if (editingLeadId && api.updateLead) {
+        await api.updateLead(editingLeadId, {
+          name: leadData.name,
+          phone: leadData.phone,
+          interest: leadData.sport,
+          status: leadData.status,
+          notes: leadData.notes,
+        });
+      } else if (api.createLead) {
+        const selectedBranchObj = branches.find((b) => b.name === leadData.branch);
+        await api.createLead({
+          name: leadData.name,
+          phone: leadData.phone || '',
+          interest: leadData.sport,
+          status: leadData.status,
+          branch_id: selectedBranchObj?.id || undefined,
+          notes: leadData.notes,
+        });
       }
-      return true;
-    } catch (error) {
-      console.error('Failed to save lead to DB', error);
-      return false;
+    } catch {
+      // fallback
     }
   };
 
-  const handleSaveLead = async () => {
+  const handleSaveLead = async (event: FormEvent) => {
+    event.preventDefault();
+
     if (!formState.name.trim()) {
-      window.alert('أدخل اسم العميل أولاً');
+      showToast('يرجى كتابة اسم العميل', 'warning');
       return;
     }
 
-    const tags = formState.tags
-      .split(',')
-      .map((item) => item.trim())
-      .filter(Boolean);
-
+    const currentLead = editingLeadId ? leads.find((l) => l.id === editingLeadId) : null;
     const leadData: Lead = {
       id: editingLeadId || createLeadId(),
       name: formState.name.trim(),
       parent: formState.parent.trim(),
       phone: formState.phone.trim(),
       sport: formState.sport.trim(),
-      age: formState.age,
+      age: formState.age.trim(),
       branch: formState.branch.trim(),
       source: formState.source.trim(),
       score: formState.score,
       followDate: formState.followDate,
-      tags,
+      tags: formState.tags
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean),
       notes: formState.notes.trim(),
-      status: editingLeadId ? (leads.find((lead) => lead.id === editingLeadId)?.status || 'new') : 'new',
+      status: currentLead?.status || 'new',
     };
 
-    // Try API first, fall back to localStorage
     await saveLeadToDb(leadData);
 
     setLeads((prev) => {
@@ -359,19 +369,19 @@ export default function Leads() {
       return next;
     });
 
+    showToast(editingLeadId ? 'تم تعديل العميل بنجاح' : 'تم إضافة العميل بنجاح');
     closeModal();
   };
 
   const handleRemoveLead = async (leadId: string) => {
     if (!window.confirm('هل تريد حذف هذا العميل؟')) return;
 
-    // Try API first
     const api = window.api;
     if (api?.deleteLead && api?.getToken?.()) {
       try {
         await api.deleteLead(leadId);
-      } catch (error) {
-        console.error('Failed to delete lead from DB', error);
+      } catch {
+        // fallback
       }
     }
 
@@ -380,16 +390,16 @@ export default function Leads() {
       window.localStorage.setItem(LEADS_KEY, JSON.stringify(next));
       return next;
     });
+    showToast('تم حذف العميل بنجاح');
   };
 
   const handleChangeStatus = async (leadId: string, status: LeadStatus) => {
-    // Try API first
     const api = window.api;
     if (api?.updateLead && api?.getToken?.()) {
       try {
         await api.updateLead(leadId, { status });
-      } catch (error) {
-        console.error('Failed to update lead status in DB', error);
+      } catch {
+        // fallback
       }
     }
 
@@ -398,11 +408,12 @@ export default function Leads() {
       window.localStorage.setItem(LEADS_KEY, JSON.stringify(next));
       return next;
     });
+    showToast(`تم تغيير الحالة إلى ${getStatusLabel(status)}`);
   };
 
   const handleSendLeadWhatsApp = (phone?: string, name?: string) => {
-    if (!phone) {
-      window.alert('لا يوجد رقم هاتف لهذا العميل');
+    if (!phone?.trim()) {
+      showToast('لا يوجد رقم هاتف لهذا العميل', 'warning');
       return;
     }
 
@@ -414,18 +425,18 @@ export default function Leads() {
 
   const handleSendBulkWhatsApp = async () => {
     if (!bulkBranch) {
-      window.alert('اختر فرعاً أولاً');
+      showToast('اختر فرعاً أولاً', 'warning');
       return;
     }
 
     if (!bulkMessage.trim()) {
-      window.alert('اكتب نص الرسالة أولاً');
+      showToast('اكتب نص الرسالة أولاً', 'warning');
       return;
     }
 
     const targets = leads.filter((lead) => lead.branch === bulkBranch && lead.phone && lead.status !== 'convert');
     if (!targets.length) {
-      window.alert('لا يوجد عملاء مناسبين للإرسال في هذا الفرع');
+      showToast('لا يوجد عملاء مناسبين للإرسال في هذا الفرع', 'warning');
       return;
     }
 
@@ -444,6 +455,7 @@ export default function Leads() {
 
     setBulkStatus(`تم الانتهاء من الإرسال إلى ${targets.length} عميل.`);
     setIsSendingBulk(false);
+    showToast('تم الإرسال الجماعي بنجاح');
   };
 
   const handleConvertToClient = (lead: Lead) => {
@@ -462,26 +474,42 @@ export default function Leads() {
       window.localStorage.setItem(LEADS_KEY, JSON.stringify(next));
       return next;
     });
-    window.alert('تم تحويل العميل إلى لاعب');
+    showToast('تم تحويل العميل إلى لاعب مسجل ⚽');
     navigate('/players');
   };
 
   return (
-    <div className="space-y-6">
-      <div className="rounded-3xl bg-white p-6 shadow-sm shadow-slate-200 ring-1 ring-slate-200/70">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <p className="text-sm text-slate-500">إدارة العملاء المحتملين</p>
-            <h1 className="mt-2 text-3xl font-semibold text-slate-900">العملاء المحتملين</h1>
+    <div dir="rtl" className="space-y-5 font-sans">
+      {/* Toast Notification */}
+      {toast ? (
+        <div
+          className={`fixed right-6 top-6 z-50 rounded-2xl px-4 py-3 text-sm font-semibold shadow-xl transition-all ${toast.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white'
+            }`}
+        >
+          {toast.message}
+        </div>
+      ) : null}
+
+      {/* ── Compact Header Card ── */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <div className="rounded-xl bg-sky-50 p-3 text-sky-600">🎯</div>
+            <div>
+              <h1 className="text-xl font-bold text-slate-900">إدارة العملاء المحتملين (Leads)</h1>
+              <p className="text-xs text-slate-500">تتبع واستقطاب العملاء المحتملين وتحويلهم إلى لاعبين</p>
+            </div>
           </div>
-          <div className="flex flex-wrap gap-3">
+
+          <div className="flex items-center gap-2">
             {canEditLeads && (
               <button
                 type="button"
                 onClick={openAddModal}
-                className="rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700"
+                className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700"
               >
-                + إضافة عميل
+                <Plus className="h-4 w-4" />
+                إضافة عميل
               </button>
             )}
             <button
@@ -489,303 +517,489 @@ export default function Leads() {
               onClick={() => {
                 const csv = [
                   ['الاسم', 'ولي الأمر', 'الهاتف', 'الرياضة', 'العمر', 'الفرع', 'المصدر', 'الحالة'].join(','),
-                  ...filteredLeads.map((lead) =>
-                    [
-                      lead.name,
-                      lead.parent || '',
-                      lead.phone || '',
-                      lead.sport || '',
-                      lead.age || '',
-                      lead.branch || '',
-                      lead.source || '',
-                      getStatusLabel(lead.status),
-                    ].join(','),
+                  ...filteredLeads.map((l) =>
+                    [l.name, l.parent || '', l.phone || '', l.sport || '', l.age || '', l.branch || '', l.source || '', getStatusLabel(l.status)].join(',')
                   ),
                 ].join('\n');
-
                 const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
                 const url = URL.createObjectURL(blob);
                 const link = document.createElement('a');
                 link.href = url;
                 link.download = 'leads.csv';
                 link.click();
-                URL.revokeObjectURL(url);
               }}
-              className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+              className="rounded-xl bg-emerald-600 px-3.5 py-2.5 text-xs font-semibold text-white transition hover:bg-emerald-700"
             >
-              Excel
+              Excel ⬇
             </button>
+            <button
+              type="button"
+              onClick={() => setViewMode(viewMode === 'cards' ? 'table' : 'cards')}
+              className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
+            >
+              {viewMode === 'cards' ? 'عرض جدول 📋' : 'عرض كروت 🎴'}
+            </button>
+          </div>
+        </div>
+
+        {/* Compact Stat Cards Grid */}
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
+          <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3 text-right">
+            <span className="text-xs font-medium text-slate-500">إجمالي العملاء</span>
+            <p className="mt-1 text-xl font-bold text-slate-900">{stats.total}</p>
+          </div>
+          <div className="rounded-xl border border-sky-100 bg-sky-50/50 p-3 text-right">
+            <span className="text-xs font-medium text-sky-600">عملاء جدد</span>
+            <p className="mt-1 text-xl font-bold text-sky-700">{stats.newCount}</p>
+          </div>
+          <div className="rounded-xl border border-amber-100 bg-amber-50/50 p-3 text-right">
+            <span className="text-xs font-medium text-amber-600">مهتم جداً</span>
+            <p className="mt-1 text-xl font-bold text-amber-700">{stats.intCount}</p>
+          </div>
+          <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 p-3 text-right">
+            <span className="text-xs font-medium text-emerald-600">تم التحويل للاعب</span>
+            <p className="mt-1 text-xl font-bold text-emerald-700">{stats.convCount}</p>
+          </div>
+          <div className="col-span-2 rounded-xl border border-rose-100 bg-rose-50/50 p-3 text-right sm:col-span-1">
+            <span className="text-xs font-medium text-rose-600">ساخن 🔥</span>
+            <p className="mt-1 text-xl font-bold text-rose-600">{stats.hotCount}</p>
           </div>
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-        <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-sm text-slate-500">الإجمالي</p>
-          <p className="mt-2 text-3xl font-semibold text-slate-900">{stats.total}</p>
-        </div>
-        <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-sm text-slate-500">جدد</p>
-          <p className="mt-2 text-3xl font-semibold text-slate-900">{stats.newCount}</p>
-        </div>
-        <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-sm text-slate-500">مهتم</p>
-          <p className="mt-2 text-3xl font-semibold text-slate-900">{stats.intCount}</p>
-        </div>
-        <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-sm text-slate-500">تم التحويل</p>
-          <p className="mt-2 text-3xl font-semibold text-slate-900">{stats.convCount}</p>
-        </div>
-        <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-sm text-slate-500">ساخن</p>
-          <p className="mt-2 text-3xl font-semibold text-slate-900">{stats.hotCount}</p>
-        </div>
-      </div>
-
-      <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
-        <h2 className="text-lg font-semibold text-emerald-800">إرسال رسالة جماعية لفرع محدد</h2>
-        <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_2fr_auto]">
-          <label className="space-y-2 text-sm text-slate-700">
-            الفرع المستهدف
-            <select
-              value={bulkBranch}
-              onChange={(event) => setBulkBranch(event.target.value)}
-              className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-right"
-            >
-              <option value="">-- اختر فرعاً --</option>
-              {branchOptions.map((branch) => (
-                <option key={branch} value={branch}>
-                  {branch}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="space-y-2 text-sm text-slate-700">
-            نص الرسالة
-            <textarea
-              value={bulkMessage}
-              onChange={(event) => setBulkMessage(event.target.value)}
-              placeholder="اكتب رسالتك هنا..."
-              className="min-h-[44px] w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-right"
+      {/* ── Search & Filter Card ── */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="relative flex items-center">
+            <SearchSm className="absolute right-3 h-4 w-4 text-slate-400" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="بحث بالاسم، ولي الأمر، الهاتف..."
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pr-9 pl-3 text-right text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
             />
-          </label>
-          
-        </div>
-        <button
-            type="button"
-            onClick={handleSendBulkWhatsApp}
-            disabled={isSendingBulk}
-            className="rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-400"
-          >
-            {isSendingBulk ? 'جارٍ الإرسال...' : 'إرسال للكل'}
-          </button>
-        {bulkStatus ? <p className="mt-3 text-sm text-emerald-700">{bulkStatus}</p> : null}
-      </div>
+          </div>
 
-      <div className="rounded-3xl bg-white p-6 shadow-sm shadow-slate-200 ring-1 ring-slate-200/70">
-        <div className="grid gap-4 lg:grid-cols-4">
-          <input
-            value={searchTerm}
-            onChange={(event) => setSearchTerm(event.target.value)}
-            placeholder="بحث..."
-            className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-700"
-          />
           <select
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value)}
-            className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-700"
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-700 outline-none"
           >
-            <option value="">كل الحالات</option>
+            <option value="all">كل الحالات</option>
             <option value="new">جديد</option>
             <option value="contact">تم التواصل</option>
-            <option value="trial">حجز تجربة</option>
-            <option value="interested">مهتم</option>
+            <option value="trial">تمرين تجريبي</option>
+            <option value="interested">مهتم جداً</option>
             <option value="not">غير مهتم</option>
-            <option value="convert">تم التحويل</option>
+            <option value="convert">تم التحويل للاعب</option>
           </select>
+
           <select
-            value={branchFilter}
-            onChange={(event) => setBranchFilter(event.target.value)}
-            className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-700"
+            value={filterScore}
+            onChange={(e) => setFilterScore(e.target.value)}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-700 outline-none"
           >
-            <option value="">كل الفروع</option>
-            {branchOptions.map((branch) => (
-              <option key={branch} value={branch}>
-                {branch}
+            <option value="all">جميع مستويات الاهتمام</option>
+            <option value="hot">ساخن 🔥</option>
+            <option value="mid">متوسط ⚡</option>
+            <option value="cold">بارد ❄️</option>
+          </select>
+
+          <select
+            value={filterBranch}
+            onChange={(e) => setFilterBranch(e.target.value)}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-700 outline-none"
+          >
+            <option value="all">كل الفروع</option>
+            {branches.map((b) => (
+              <option key={b.id || b.name} value={b.name}>
+                {b.name}
               </option>
             ))}
           </select>
-          <input
-            value={tagFilter}
-            onChange={(event) => setTagFilter(event.target.value)}
-            placeholder="بحث بالـ Tags"
-            className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-700"
-          />
-        </div>
-
-        <div className="mt-6 overflow-x-auto">
-          <table className="min-w-full divide-y divide-slate-200 text-sm">
-            <thead className="bg-slate-50">
-              <tr>
-                <th className="px-4 py-3 text-right">الاسم</th>
-                <th className="px-4 py-3 text-right">ولي الأمر</th>
-                <th className="px-4 py-3 text-right">الهاتف</th>
-                <th className="px-4 py-3 text-right">الرياضة</th>
-                <th className="px-4 py-3 text-right">العمر</th>
-                <th className="px-4 py-3 text-right">الفرع</th>
-                <th className="px-4 py-3 text-right">المصدر</th>
-                <th className="px-4 py-3 text-right">التقييم</th>
-                <th className="px-4 py-3 text-right">المتابعة</th>
-                <th className="px-4 py-3 text-right">Tags</th>
-                <th className="px-4 py-3 text-right">الحالة</th>
-                <th className="px-4 py-3 text-center">إجراءات</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-200 bg-white">
-              {filteredLeads.length === 0 ? (
-                <tr>
-                  <td colSpan={12} className="px-4 py-8 text-center text-slate-500">
-                    لا يوجد عملاء مطابقين للبحث
-                  </td>
-                </tr>
-              ) : (
-                filteredLeads.map((lead) => (
-                  <tr key={lead.id}>
-                    <td className="px-4 py-3 font-semibold text-slate-900">{lead.name}</td>
-                    <td className="px-4 py-3 text-slate-600">{lead.parent || '-'}</td>
-                    <td className="px-4 py-3 text-slate-600">{lead.phone || '-'}</td>
-                    <td className="px-4 py-3 text-slate-600">{lead.sport || '-'}</td>
-                    <td className="px-4 py-3 text-slate-600">{lead.age || '-'}</td>
-                    <td className="px-4 py-3 text-slate-600">{lead.branch || '-'}</td>
-                    <td className="px-4 py-3 text-slate-600">{lead.source || '-'}</td>
-                    <td className="px-4 py-3 text-slate-600">{getScoreLabel(lead.score)}</td>
-                    <td className="px-4 py-3 text-slate-600">{lead.followDate || '-'}</td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {lead.tags?.length
-                        ? lead.tags.map((tag) => (
-                            <span key={tag} className="ml-2 rounded-full bg-slate-100 px-2 py-1 text-xs">
-                              {tag}
-                            </span>
-                          ))
-                        : '-'}
-                    </td>
-                    <td className="px-4 py-3">
-                      <select
-                        value={lead.status || 'new'}
-                        onChange={(event) => handleChangeStatus(lead.id, event.target.value as LeadStatus)}
-                        className={`rounded-full border-none px-3 py-2 text-sm font-medium ${getStatusClasses(lead.status)}`}
-                      >
-                        <option value="new">جديد</option>
-                        <option value="contact">تم التواصل</option>
-                        <option value="trial">حجز تجربة</option>
-                        <option value="interested">مهتم</option>
-                        <option value="not">غير مهتم</option>
-                        <option value="convert">تم التحويل</option>
-                      </select>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap justify-center gap-2">
-                        <button type="button" onClick={() => handleSendLeadWhatsApp(lead.phone, lead.name)} className="rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white">
-                          واتساب
-                        </button>
-                        {canEditLeads && (
-                          <button type="button" onClick={() => handleConvertToClient(lead)} className="rounded-xl bg-sky-600 px-3 py-2 text-sm font-semibold text-white">
-                            تحويل
-                          </button>
-                        )}
-                        {canEditLeads && (
-                          <button type="button" onClick={() => openEditModal(lead)} className="rounded-xl bg-violet-600 px-3 py-2 text-sm font-semibold text-white">
-                            تعديل
-                          </button>
-                        )}
-                        {canEditLeads && (
-                          <button type="button" onClick={() => handleRemoveLead(lead.id)} className="rounded-xl bg-rose-600 px-3 py-2 text-sm font-semibold text-white">
-                            حذف
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
         </div>
       </div>
 
+      {/* ── Bulk WhatsApp Bar ── */}
+      <div className="rounded-2xl border border-emerald-100 bg-emerald-50/50 p-4 shadow-sm space-y-3">
+        <div className="flex items-center gap-2 text-xs font-bold text-emerald-800">
+          <AppIcon icon={MessageChatCircle} className="h-4 w-4 text-emerald-600" />
+          <span>إرسال رسالة واتساب جماعية لعملاء فرع معين</span>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-3 items-center">
+          <select
+            value={bulkBranch}
+            onChange={(e) => setBulkBranch(e.target.value)}
+            className="rounded-xl border border-emerald-200 bg-white px-3 py-2 text-xs text-slate-800 outline-none"
+          >
+            <option value="">-- اختر الفرع المستهدف --</option>
+            {branches.map((b) => (
+              <option key={b.id || b.name} value={b.name}>
+                {b.name}
+              </option>
+            ))}
+          </select>
+
+          <input
+            value={bulkMessage}
+            onChange={(e) => setBulkMessage(e.target.value)}
+            placeholder="نص الرسالة الجماعية..."
+            className="rounded-xl border border-emerald-200 bg-white px-3 py-2 text-xs text-slate-800 outline-none"
+          />
+
+          <button
+            type="button"
+            disabled={isSendingBulk}
+            onClick={handleSendBulkWhatsApp}
+            className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-emerald-700 transition disabled:opacity-50"
+          >
+            {isSendingBulk ? 'جاري الإرسال...' : 'إرسال جماعي 💬'}
+          </button>
+        </div>
+        {bulkStatus ? <p className="text-[11px] text-emerald-700 font-medium">{bulkStatus}</p> : null}
+      </div>
+
+      {/* ── Content View (Cards or Table) ── */}
+      {viewMode === 'cards' ? (
+        /* ── Compact Cards View ── */
+        filteredLeads.length === 0 ? (
+          <div className="rounded-2xl border border-slate-200 bg-white p-12 text-center text-sm text-slate-400">
+            لا يوجد عملاء يطابقون البحث.
+          </div>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {filteredLeads.map((lead) => {
+              const isConverted = lead.status === 'convert';
+
+              return (
+                <div
+                  key={lead.id}
+                  className={`group relative flex flex-col justify-between rounded-2xl border bg-white p-4 shadow-sm transition hover:shadow-md ${isConverted ? 'border-emerald-200 bg-emerald-50/10' : 'border-slate-200'
+                    }`}
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-2 border-b border-slate-100 pb-3">
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <h3 className="font-bold text-slate-900 text-sm">{lead.name}</h3>
+                          {lead.score === 'hot' ? (
+                            <span className="text-xs">🔥</span>
+                          ) : lead.score === 'mid' ? (
+                            <span className="text-xs">⚡</span>
+                          ) : null}
+                        </div>
+                        {lead.parent ? <p className="text-[11px] text-slate-400">ولي الأمر: {lead.parent}</p> : null}
+                      </div>
+
+                      <span
+                        className={`inline-flex rounded-full border px-2.5 py-0.5 text-[10px] font-bold ${getStatusBadgeStyle(
+                          lead.status
+                        )}`}
+                      >
+                        {getStatusLabel(lead.status)}
+                      </span>
+                    </div>
+
+                    <div className="mt-3 space-y-2 text-xs text-slate-600">
+                      <div className="flex items-center justify-between bg-slate-50 p-2 rounded-lg">
+                        <span className="text-slate-500">الرياضة والفرع:</span>
+                        <span className="font-medium text-slate-800">
+                          {lead.sport || 'رياضة عامة'} {lead.branch ? `• ${lead.branch}` : ''}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between bg-slate-50 p-2 rounded-lg">
+                        <span className="text-slate-500">الهاتف:</span>
+                        <span className="font-mono text-slate-800">{lead.phone || '-'}</span>
+                      </div>
+
+                      {lead.notes ? (
+                        <div className="bg-slate-50 p-2 rounded-lg text-slate-500 text-[11px]">
+                          {lead.notes}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex items-center justify-between gap-2 border-t border-slate-100 pt-3">
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => handleSendLeadWhatsApp(lead.phone, lead.name)}
+                        className="rounded-lg bg-emerald-50 p-1.5 text-emerald-700 hover:bg-emerald-100 transition"
+                        title="واتساب"
+                      >
+                        <AppIcon icon={Phone01} className="h-4 w-4" />
+                      </button>
+
+                      {canEditLeads && !isConverted && (
+                        <button
+                          type="button"
+                          onClick={() => handleConvertToClient(lead)}
+                          className="rounded-lg bg-emerald-600 px-2 py-1 text-[10px] font-bold text-white hover:bg-emerald-700 transition"
+                        >
+                          تحويل للاعب ⚽
+                        </button>
+                      )}
+                    </div>
+
+                    {canEditLeads && (
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => openEditModal(lead)}
+                          className="rounded-lg bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-200 transition"
+                        >
+                          تعديل
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveLead(lead.id)}
+                          className="rounded-lg bg-rose-50 p-1.5 text-rose-600 hover:bg-rose-100 transition"
+                          title="حذف"
+                        >
+                          <AppIcon icon={Trash01} className="h-4 w-4" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )
+      ) : (
+        /* ── Compact Table View ── */
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-right text-xs divide-y divide-slate-200">
+              <thead className="bg-slate-50 text-slate-500">
+                <tr>
+                  <th className="px-4 py-3 font-semibold">الاسم</th>
+                  <th className="px-4 py-3 font-semibold">ولي الأمر</th>
+                  <th className="px-4 py-3 font-semibold">الهاتف</th>
+                  <th className="px-4 py-3 font-semibold">الرياضة</th>
+                  <th className="px-4 py-3 font-semibold">الفرع</th>
+                  <th className="px-4 py-3 font-semibold">الاهتمام</th>
+                  <th className="px-4 py-3 font-semibold">الحالة</th>
+                  <th className="px-4 py-3 text-center font-semibold">الإجراءات</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 bg-white">
+                {filteredLeads.map((lead) => {
+                  const isConverted = lead.status === 'convert';
+
+                  return (
+                    <tr key={lead.id} className="hover:bg-slate-50/70 transition">
+                      <td className="px-4 py-3 font-bold text-slate-900">{lead.name}</td>
+                      <td className="px-4 py-3 text-slate-600">{lead.parent || '-'}</td>
+                      <td className="px-4 py-3 font-mono text-slate-700">{lead.phone || '-'}</td>
+                      <td className="px-4 py-3 text-slate-700">{lead.sport || '-'}</td>
+                      <td className="px-4 py-3 text-slate-600">{lead.branch || '-'}</td>
+                      <td className="px-4 py-3 font-semibold">
+                        {lead.score === 'hot' ? '🔥 ساخن' : lead.score === 'mid' ? '⚡ متوسط' : '❄️ بارد'}
+                      </td>
+                      <td className="px-4 py-3">
+                        <select
+                          disabled={!canEditLeads}
+                          value={lead.status || 'new'}
+                          onChange={(e) => handleChangeStatus(lead.id, e.target.value as LeadStatus)}
+                          className={`rounded-lg border px-2 py-1 text-[10px] font-bold outline-none cursor-pointer ${getStatusBadgeStyle(
+                            lead.status
+                          )}`}
+                        >
+                          <option value="new">جديد</option>
+                          <option value="contact">تم التواصل</option>
+                          <option value="trial">تمرين تجريبي</option>
+                          <option value="interested">مهتم جداً</option>
+                          <option value="not">غير مهتم</option>
+                          <option value="convert">تم التحويل للاعب</option>
+                        </select>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleSendLeadWhatsApp(lead.phone, lead.name)}
+                            className="rounded-lg bg-emerald-50 p-1.5 text-emerald-700 hover:bg-emerald-100 transition"
+                            title="واتساب"
+                          >
+                            <AppIcon icon={Phone01} className="h-4 w-4" />
+                          </button>
+
+                          {canEditLeads && !isConverted && (
+                            <button
+                              type="button"
+                              onClick={() => handleConvertToClient(lead)}
+                              className="rounded-lg bg-emerald-600 px-2 py-1 text-[10px] font-bold text-white hover:bg-emerald-700 transition"
+                            >
+                              تحويل للاعب
+                            </button>
+                          )}
+
+                          {canEditLeads && (
+                            <button
+                              type="button"
+                              onClick={() => openEditModal(lead)}
+                              className="rounded-lg bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-200 transition"
+                            >
+                              تعديل
+                            </button>
+                          )}
+                          {canEditLeads && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveLead(lead.id)}
+                              className="rounded-lg bg-rose-50 p-1.5 text-rose-600 hover:bg-rose-100 transition"
+                              title="حذف"
+                            >
+                              <AppIcon icon={Trash01} className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+
+                {filteredLeads.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="px-4 py-10 text-center text-slate-400 text-xs">
+                      لا يوجد عملاء يطابقون البحث.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal Dialog: Add / Edit Lead ── */}
       {isModalOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4">
-          <div className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-[32px] bg-white shadow-2xl ring-1 ring-slate-200/70">
-            <div className="flex items-start justify-between border-b border-slate-200 bg-slate-50 px-6 py-5">
-              <div>
-                <p className="text-sm text-slate-500">إدارة العملاء المحتملين</p>
-                <h2 className="mt-1 text-xl font-semibold text-slate-900">{editingLeadId ? 'تعديل العميل' : 'إضافة عميل'}</h2>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
+          <div className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-xl ring-1 ring-slate-200">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+              <div className="flex items-center gap-2">
+                <div className="rounded-xl bg-sky-50 p-2.5 text-sky-600">
+                  <AppIcon icon={User01} className="h-5 w-5" />
+                </div>
+                <h2 className="text-base font-bold text-slate-900">
+                  {editingLeadId ? 'تعديل بيانات العميل' : 'إضافة عميل محتمل جديد'}
+                </h2>
               </div>
-              <button type="button" onClick={closeModal} className="rounded-full p-2 text-slate-500 transition hover:bg-slate-200 hover:text-slate-900">
-                ×
+              <button
+                type="button"
+                onClick={closeModal}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+              >
+                ✕
               </button>
             </div>
-            <div className="overflow-y-auto p-6">
-              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
-                <p className="text-sm text-slate-600">أدخل بيانات العميل المحتمل بطريقة منظمة حتى يسهل المتابعة والتخزين.</p>
+
+            <form id="leadModalForm" onSubmit={handleSaveLead} className="space-y-4 p-5 text-right text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block mb-1 font-semibold text-slate-700">اسم المشترك/اللاعب</label>
+                  <input
+                    required
+                    value={formState.name}
+                    placeholder="اسم العميل..."
+                    onChange={(e) => setFormState((prev) => ({ ...prev, name: e.target.value }))}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block mb-1 font-semibold text-slate-700">ولي الأمر</label>
+                  <input
+                    value={formState.parent}
+                    placeholder="اسم ولي الأمر..."
+                    onChange={(e) => setFormState((prev) => ({ ...prev, parent: e.target.value }))}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
+                  />
+                </div>
               </div>
-              <div className="mt-6 grid gap-4 md:grid-cols-2">
-                <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                  اسم اللاعب
-                  <input value={formState.name} onChange={(event) => setFormState((prev) => ({ ...prev, name: event.target.value }))} placeholder="أدخل الاسم" className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" />
-                </label>
-                <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                  اسم ولي الأمر
-                  <input value={formState.parent} onChange={(event) => setFormState((prev) => ({ ...prev, parent: event.target.value }))} placeholder="أدخل اسم ولي الأمر" className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" />
-                </label>
-                <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                  رقم الهاتف
-                  <input value={formState.phone} onChange={(event) => setFormState((prev) => ({ ...prev, phone: event.target.value }))} placeholder="مثلاً: 01000000000" className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" />
-                </label>
-                <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                  الرياضة
-                  <input value={formState.sport} onChange={(event) => setFormState((prev) => ({ ...prev, sport: event.target.value }))} placeholder="مثلاً: كرة قدم" className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" />
-                </label>
-                <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                  العمر
-                  <input type="number" value={formState.age} onChange={(event) => setFormState((prev) => ({ ...prev, age: event.target.value }))} placeholder="أدخل العمر" className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" />
-                </label>
-                <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                  الفرع
-                  <input value={formState.branch} onChange={(event) => setFormState((prev) => ({ ...prev, branch: event.target.value }))} placeholder="أدخل اسم الفرع" className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" />
-                </label>
-                <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                  المصدر
-                  <input value={formState.source} onChange={(event) => setFormState((prev) => ({ ...prev, source: event.target.value }))} placeholder="مثلاً: إنستغرام" className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" />
-                </label>
-                <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                  التقييم
-                  <select value={formState.score} onChange={(event) => setFormState((prev) => ({ ...prev, score: event.target.value as LeadScore }))} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none">
-                    <option value="hot">ساخن</option>
-                    <option value="mid">متوسط</option>
-                    <option value="cold">بارد</option>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block mb-1 font-semibold text-slate-700">رقم الهاتف</label>
+                  <input
+                    value={formState.phone}
+                    placeholder="01000000000"
+                    onChange={(e) => setFormState((prev) => ({ ...prev, phone: e.target.value }))}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block mb-1 font-semibold text-slate-700">الرياضة / اللعبة</label>
+                  <input
+                    value={formState.sport}
+                    placeholder="مثال: كرة القدم"
+                    onChange={(e) => setFormState((prev) => ({ ...prev, sport: e.target.value }))}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block mb-1 font-semibold text-slate-700">الفرع</label>
+                  <select
+                    value={formState.branch}
+                    onChange={(e) => setFormState((prev) => ({ ...prev, branch: e.target.value }))}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-700 outline-none"
+                  >
+                    <option value="">-- اختر الفرع --</option>
+                    {branches.map((b) => (
+                      <option key={b.id || b.name} value={b.name}>
+                        {b.name}
+                      </option>
+                    ))}
                   </select>
-                </label>
-                <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                  تاريخ المتابعة
-                  <input type="date" value={formState.followDate} onChange={(event) => setFormState((prev) => ({ ...prev, followDate: event.target.value }))} className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" />
-                </label>
-                <label className="space-y-2 text-right text-sm font-medium text-slate-700 md:col-span-2">
-                  Tags
-                  <input value={formState.tags} onChange={(event) => setFormState((prev) => ({ ...prev, tags: event.target.value }))} placeholder="مثال: VIP, Trial" className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" />
-                </label>
-                <label className="space-y-2 text-right text-sm font-medium text-slate-700 md:col-span-2">
-                  ملاحظات
-                  <textarea value={formState.notes} onChange={(event) => setFormState((prev) => ({ ...prev, notes: event.target.value }))} placeholder="اكتب أي ملاحظات هنا" className="min-h-[96px] w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none" />
-                </label>
+                </div>
+
+                <div>
+                  <label className="block mb-1 font-semibold text-slate-700">مستوى الاهتمام</label>
+                  <select
+                    value={formState.score}
+                    onChange={(e) => setFormState((prev) => ({ ...prev, score: e.target.value as LeadScore }))}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-700 outline-none"
+                  >
+                    <option value="hot">ساخن 🔥</option>
+                    <option value="mid">متوسط ⚡</option>
+                    <option value="cold">بارد ❄️</option>
+                  </select>
+                </div>
               </div>
-            </div>
-            <div className="flex items-center justify-end gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4">
-              <button type="button" onClick={closeModal} className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100">
+
+              <div>
+                <label className="block mb-1 font-semibold text-slate-700">ملاحظات / أفكار التوزيع</label>
+                <textarea
+                  rows={2}
+                  value={formState.notes}
+                  placeholder="أي تفاصيل عن اهتمام العميل..."
+                  onChange={(e) => setFormState((prev) => ({ ...prev, notes: e.target.value }))}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
+                />
+              </div>
+            </form>
+
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/50 px-5 py-3">
+              <button
+                type="button"
+                onClick={closeModal}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition"
+              >
                 إلغاء
               </button>
-              <button type="button" onClick={handleSaveLead} className="rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700">
-                حفظ
+              <button
+                type="submit"
+                form="leadModalForm"
+                className="rounded-xl bg-sky-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-sky-700 transition"
+              >
+                {editingLeadId ? 'حفظ التعديلات' : 'إضافة العميل'}
               </button>
             </div>
           </div>

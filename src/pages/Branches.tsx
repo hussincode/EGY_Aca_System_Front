@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Folder, LinkExternal01, MarkerPin01, SearchSm } from '@untitledui/icons';
+import { Folder, LinkExternal01, MarkerPin01, SearchSm, Plus, Trash01 } from '@untitledui/icons';
 import AppIcon from '@/components/AppIcon';
+import Pagination from '@/components/Pagination';
 import { useAuth } from '@/contexts/AuthContext';
 import { API_BASE_URL } from '@/api';
 
@@ -79,6 +80,7 @@ function isUrl(str?: string) {
     /maps\.app/i.test(trimmed)
   );
 }
+
 function getFormattedUrl(url: string) {
   const trimmed = url.trim();
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
@@ -133,6 +135,7 @@ export default function Branches() {
   const canEditBranches = canEdit('branches');
   const [branches, setBranches] = useState<Branch[]>(() => readLocalBranches());
   const [search, setSearch] = useState('');
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>('table');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingBranchId, setEditingBranchId] = useState<string | null>(null);
   const [branchToDelete, setBranchToDelete] = useState<Branch | null>(null);
@@ -152,6 +155,19 @@ export default function Branches() {
         .includes(term),
     );
   }, [branches, search]);
+
+  const [currentPage, setCurrentPage] = useState(1);
+  const rowsPerPage = 10;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search]);
+
+  const totalPages = Math.ceil(filteredBranches.length / rowsPerPage) || 1;
+  const paginatedBranches = useMemo(() => {
+    const start = (currentPage - 1) * rowsPerPage;
+    return filteredBranches.slice(start, start + rowsPerPage);
+  }, [filteredBranches, currentPage]);
 
   const stats = useMemo(() => {
     const total = branches.length;
@@ -230,8 +246,8 @@ export default function Branches() {
   };
 
   const openBranchModal = (branchId?: string) => {
-    if (!canManageBranches) {
-      showToast('إدارة الفروع متاحة للأدمن فقط', 'error');
+    if (!canManageBranches && !canEditBranches) {
+      showToast('إدارة الفروع متاحة للمصرح لهم فقط', 'error');
       return;
     }
 
@@ -255,8 +271,8 @@ export default function Branches() {
   };
 
   const requestDeleteBranch = (branchId: string) => {
-    if (!canManageBranches) {
-      showToast('حذف الفروع متاح للأدمن فقط', 'error');
+    if (!canManageBranches && !canEditBranches) {
+      showToast('حذف الفروع متاح للمصرح لهم فقط', 'error');
       return;
     }
 
@@ -276,7 +292,7 @@ export default function Branches() {
     if (getApiToken()) {
       try {
         await fetchJson(`/branches/${branchId}`, { method: 'DELETE' });
-        showToast('تم حذف الفرع عبر الباك إند', 'success');
+        showToast('تم حذف الفرع بنجاح', 'success');
         await loadBranches();
         setBranchToDelete(null);
         return;
@@ -330,7 +346,7 @@ export default function Branches() {
               location: payload.location,
             }),
           });
-          showToast('تم تعديل الفرع عبر الباك إند', 'success');
+          showToast('تم تعديل الفرع بنجاح', 'success');
         } else {
           await fetchJson('/branches', {
             method: 'POST',
@@ -340,7 +356,7 @@ export default function Branches() {
               location: payload.location,
             }),
           });
-          showToast('تم إضافة الفرع عبر الباك إند', 'success');
+          showToast('تم إضافة الفرع بنجاح', 'success');
         }
         await loadBranches();
         closeBranchModal();
@@ -376,114 +392,196 @@ export default function Branches() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="rounded-3xl bg-white p-6 shadow-sm shadow-slate-200 ring-1 ring-slate-200/70">
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <div className="flex items-center gap-3 text-slate-500">
-              <AppIcon icon={Folder} className="text-slate-500" />
-              <span className="text-sm">إدارة الفروع</span>
+    <div dir="rtl" className="space-y-5 font-sans">
+      {/* Toast Notification */}
+      {toast ? (
+        <div
+          className={`fixed right-6 top-6 z-50 rounded-2xl px-4 py-3 text-sm font-semibold shadow-xl transition-all ${
+            toast.type === 'success'
+              ? 'bg-emerald-600 text-white'
+              : toast.type === 'warning'
+              ? 'bg-amber-500 text-white'
+              : 'bg-rose-600 text-white'
+          }`}
+        >
+          {toast.message}
+        </div>
+      ) : null}
+
+      {/* ── Compact Header Card ── */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <div className="rounded-xl bg-sky-50 p-3 text-sky-600">
+              <AppIcon icon={Folder} className="h-6 w-6" />
             </div>
-            <h1 className="mt-3 text-3xl font-semibold text-slate-900">إدارة الفروع</h1>
-            <p className="mt-2 text-sm text-slate-600">متابعة الفروع والمديرين والمواقع من واجهة موحدة بنفس طابع السيستم.</p>
+            <div>
+              <h1 className="text-xl font-bold text-slate-900">إدارة الفروع</h1>
+              <p className="text-xs text-slate-500">متابعة الفروع والمديرين والمواقع من واجهة موحدة بدقة</p>
+            </div>
           </div>
-          <div className="flex flex-wrap items-center gap-3">
+
+          <div className="flex items-center gap-2">
+            {canEditBranches && (
+              <button
+                type="button"
+                onClick={() => openBranchModal()}
+                className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700"
+              >
+                <Plus className="h-4 w-4" />
+                إضافة فرع
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => openBranchModal()}
-              className="inline-flex items-center gap-2 rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700"
+              onClick={() => setViewMode(viewMode === 'cards' ? 'table' : 'cards')}
+              className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
             >
-              إضافة فرع
+              {viewMode === 'cards' ? 'عرض جدول 📋' : 'عرض كروت 🎴'}
             </button>
           </div>
         </div>
-      </div>
 
-      <div className="rounded-3xl bg-white p-6 shadow-sm shadow-slate-200 ring-1 ring-slate-200/70">
-        <div className="grid gap-4 md:grid-cols-3">
-          <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5 text-center">
-            <p className="text-sm font-semibold text-slate-500">إجمالي الفروع</p>
-            <p className="mt-3 text-3xl font-semibold text-slate-900">{stats.total}</p>
-            <p className="mt-2 text-sm text-slate-500">كل الفروع المسجلة حاليًا</p>
+        {/* Compact Stat Cards Grid */}
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3 text-right">
+            <span className="text-xs font-medium text-slate-500">إجمالي الفروع</span>
+            <p className="mt-1 text-xl font-bold text-slate-900">{stats.total}</p>
           </div>
-          <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5 text-center">
-            <p className="text-sm font-semibold text-slate-500">مديرون محددون</p>
-            <p className="mt-3 text-3xl font-semibold text-slate-900">{stats.managers}</p>
-            <p className="mt-2 text-sm text-slate-500">الفروع التي لها مدير مسجل</p>
+          <div className="rounded-xl border border-sky-100 bg-sky-50/50 p-3 text-right">
+            <span className="text-xs font-medium text-sky-600">مديرون محددون</span>
+            <p className="mt-1 text-xl font-bold text-sky-700">{stats.managers}</p>
           </div>
-          <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5 text-center">
-            <p className="text-sm font-semibold text-slate-500">عناوين مكتملة</p>
-            <p className="mt-3 text-3xl font-semibold text-slate-900">{stats.locations}</p>
-            <p className="mt-2 text-sm text-slate-500">الفروع التي تحتوي على موقع واضح</p>
+          <div className="col-span-2 rounded-xl border border-emerald-100 bg-emerald-50/50 p-3 text-right sm:col-span-1">
+            <span className="text-xs font-medium text-emerald-600">عناوين ومواقع</span>
+            <p className="mt-1 text-xl font-bold text-emerald-700">{stats.locations}</p>
           </div>
         </div>
       </div>
 
-      <div className="rounded-3xl bg-white p-6 shadow-sm shadow-slate-200 ring-1 ring-slate-200/70">
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
-          <div className="flex items-center gap-3 rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3">
-            <AppIcon icon={SearchSm} className="text-slate-500" />
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="بحث عن فرع أو مدير..."
-              className="w-full border-none bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
-            />
-          </div>
-          {canEditBranches && (
-            <button
-              type="button"
-              onClick={() => openBranchModal()}
-              className="inline-flex items-center justify-center rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-700"
-            >
-              إضافة فرع
-            </button>
-          )}
+      {/* ── Search & Filter Card ── */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="relative flex items-center">
+          <SearchSm className="absolute right-3 h-4 w-4 text-slate-400" />
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="بحث باسم الفرع، المدير أو الموقع..."
+            className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pr-9 pl-3 text-right text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
+          />
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm shadow-slate-200/70">
-        <div className="flex flex-col gap-3 border-b border-slate-200 bg-slate-50 px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-slate-900">قائمة الفروع</h2>
-            <p className="mt-1 text-sm text-slate-500">عرض الفروع مع خيارات التعديل والحذف.</p>
+      {/* ── Content View (Cards or Table) ── */}
+      {viewMode === 'cards' ? (
+        /* ── Compact Cards View ── */
+        paginatedBranches.length === 0 ? (
+          <div className="rounded-2xl border border-slate-200 bg-white p-12 text-center text-sm text-slate-400">
+            لا توجد فروع تطابق البحث.
           </div>
-          <span className="rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700">{stats.total} فرع</span>
-        </div>
-        <div className="overflow-x-auto px-6 py-5">
-          <table className="min-w-full border-separate border-spacing-y-3 text-sm">
-            <thead>
-              <tr className="text-right text-slate-500">
-                <th className="px-4 py-3 text-right">اسم الفرع</th>
-                <th className="px-4 py-3 text-right">مدير الفرع</th>
-                <th className="px-4 py-3 text-right">الموقع</th>
-                <th className="px-4 py-3 text-center">الإجراءات</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredBranches.length === 0 ? (
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {paginatedBranches.map((branch) => (
+              <div
+                key={branch.id}
+                className="group relative flex flex-col justify-between rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:shadow-md"
+              >
+                <div>
+                  <div className="flex items-start justify-between gap-2 border-b border-slate-100 pb-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-50 text-sky-600 font-bold text-xs">
+                        🏢
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-slate-900 text-sm">{branch.name}</h3>
+                        <p className="text-[11px] text-slate-400">المدير: {branch.manager || 'غير محدد'}</p>
+                      </div>
+                    </div>
+
+                    <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-2.5 py-0.5 text-[10px] font-bold text-sky-700">
+                      فرع فعال
+                    </span>
+                  </div>
+
+                  <div className="mt-3 text-xs text-slate-600">
+                    {branch.location ? (
+                      isUrl(branch.location) ? (
+                        <a
+                          href={getFormattedUrl(branch.location)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 font-medium text-sky-600 bg-sky-50/60 px-3 py-1.5 rounded-lg w-full transition hover:bg-sky-100"
+                        >
+                          <AppIcon icon={MarkerPin01} className="h-3.5 w-3.5 text-sky-600 shrink-0" />
+                          <span className="truncate">عرض موقع الفرع على الخريطة</span>
+                          <AppIcon icon={LinkExternal01} className="h-3 w-3 shrink-0 opacity-70" />
+                        </a>
+                      ) : (
+                        <div className="bg-slate-50 p-2 rounded-lg text-slate-600">
+                          📍 {branch.location}
+                        </div>
+                      )
+                    ) : (
+                      <div className="bg-slate-50 p-2 rounded-lg text-slate-400">
+                        لا يوجد عنوان مسجل
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {canEditBranches && (
+                  <div className="mt-4 flex items-center justify-end gap-2 border-t border-slate-100 pt-3">
+                    <button
+                      type="button"
+                      onClick={() => openBranchModal(branch.id)}
+                      className="rounded-lg bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-200 transition"
+                    >
+                      تعديل
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => requestDeleteBranch(branch.id)}
+                      className="rounded-lg bg-rose-50 p-1.5 text-rose-600 hover:bg-rose-100 transition"
+                      title="حذف"
+                    >
+                      <AppIcon icon={Trash01} className="h-4 w-4" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )
+      ) : (
+        /* ── Compact Table View ── */
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-right text-xs divide-y divide-slate-200">
+              <thead className="bg-slate-50 text-slate-500">
                 <tr>
-                  <td colSpan={4} className="px-4 py-8 text-center text-slate-500">
-                    لم يتم العثور على فروع تطابق البحث.
-                  </td>
+                  <th className="px-4 py-3 font-semibold">اسم الفرع</th>
+                  <th className="px-4 py-3 font-semibold">مدير الفرع</th>
+                  <th className="px-4 py-3 font-semibold">الموقع</th>
+                  <th className="px-4 py-3 text-center font-semibold">الإجراءات</th>
                 </tr>
-              ) : (
-                filteredBranches.map((branch) => (
-                  <tr key={branch.id} className="rounded-3xl border border-slate-200 bg-slate-50">
-                    <td className="px-4 py-4 text-right font-semibold text-slate-900">{branch.name}</td>
-                    <td className="px-4 py-4 text-right text-slate-600">{branch.manager || '-'}</td>
-                    <td className="px-4 py-4 text-right text-slate-600">
+              </thead>
+              <tbody className="divide-y divide-slate-100 bg-white">
+                {paginatedBranches.map((branch) => (
+                  <tr key={branch.id} className="hover:bg-slate-50/70 transition">
+                    <td className="px-4 py-3 font-bold text-slate-900">{branch.name}</td>
+                    <td className="px-4 py-3 text-slate-600">{branch.manager || '-'}</td>
+                    <td className="px-4 py-3 text-slate-600">
                       {branch.location ? (
                         isUrl(branch.location) ? (
                           <a
                             href={getFormattedUrl(branch.location)}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 font-medium text-sky-600 transition hover:text-sky-700 hover:underline"
+                            className="inline-flex items-center gap-1.5 font-medium text-sky-600 hover:underline"
                           >
-                            <AppIcon icon={MarkerPin01} className="h-4 w-4 shrink-0 text-sky-600" />
-                            <span>عرض الموقع</span>
-                            <AppIcon icon={LinkExternal01} className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                            <AppIcon icon={MarkerPin01} className="h-3.5 w-3.5 shrink-0 text-sky-600" />
+                            <span>عرض الخريطة</span>
+                            <AppIcon icon={LinkExternal01} className="h-3 w-3 shrink-0 opacity-70" />
                           </a>
                         ) : (
                           branch.location
@@ -491,13 +589,14 @@ export default function Branches() {
                       ) : (
                         '-'
                       )}
-                    </td>                    <td className="px-4 py-4 text-center">
-                      <div className="flex flex-wrap justify-center gap-2">
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-center gap-2">
                         {canEditBranches && (
                           <button
                             type="button"
                             onClick={() => openBranchModal(branch.id)}
-                            className="rounded-2xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-200"
+                            className="rounded-lg bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-200 transition"
                           >
                             تعديل
                           </button>
@@ -506,118 +605,142 @@ export default function Branches() {
                           <button
                             type="button"
                             onClick={() => requestDeleteBranch(branch.id)}
-                            className="rounded-2xl bg-rose-100 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-200"
+                            className="rounded-lg bg-rose-50 p-1.5 text-rose-600 hover:bg-rose-100 transition"
+                            title="حذف"
                           >
-                            حذف
+                            <AppIcon icon={Trash01} className="h-4 w-4" />
                           </button>
                         )}
                       </div>
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                ))}
 
+                {filteredBranches.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-10 text-center text-slate-400 text-xs">
+                      لا توجد فروع تطابق البحث.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── Pagination Bar ── */}
+      <Pagination
+        currentPage={currentPage}
+        totalPages={totalPages}
+        totalItems={filteredBranches.length}
+        onPageChange={setCurrentPage}
+        label="فرع"
+      />
+
+      {/* ── Modal Dialog: Add / Edit Branch ── */}
       {isModalOpen ? (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/60 p-4">
-          <div className="w-full max-w-2xl overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-slate-200">
-            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-              <h3 className="text-xl font-semibold text-slate-900">{editingBranchId ? 'تعديل فرع' : 'إضافة فرع'}</h3>
-              <button type="button" onClick={closeBranchModal} className="text-slate-500 transition hover:text-slate-900">×</button>
-            </div>
-            <div className="space-y-6 p-6">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                  اسم الفرع
-                  <input
-                    value={formState.name}
-                    placeholder='مدينة نصر'
-                    onChange={(event) => setFormState((prev) => ({ ...prev, name: event.target.value }))}
-                    className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
-                  />
-                </label>
-                <label className="space-y-2 text-right text-sm font-medium text-slate-700">
-                  مدير الفرع
-                  <input
-                    value={formState.manager}
-                    placeholder='محمد احمد'
-                    onChange={(event) => setFormState((prev) => ({ ...prev, manager: event.target.value }))}
-                    className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-right text-sm text-slate-900 outline-none"
-                  />
-                </label>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
+          <div className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-xl ring-1 ring-slate-200">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+              <div className="flex items-center gap-2">
+                <div className="rounded-xl bg-sky-50 p-2.5 text-sky-600">
+                  <AppIcon icon={Folder} className="h-5 w-5" />
+                </div>
+                <h2 className="text-base font-bold text-slate-900">
+                  {editingBranchId ? 'تعديل الفرع' : 'إضافة فرع جديد'}
+                </h2>
               </div>
-              <label className="block space-y-2 text-right text-sm font-medium text-slate-700">
-                <span>رابط الموقع (خرائط جوجل / Google Maps)</span>
+              <button
+                type="button"
+                onClick={closeBranchModal}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4 p-5 text-right text-xs">
+              <div>
+                <label className="block mb-1 font-semibold text-slate-700">اسم الفرع</label>
+                <input
+                  value={formState.name}
+                  placeholder="مثال: فرع مدينة نصر"
+                  onChange={(event) => setFormState((prev) => ({ ...prev, name: event.target.value }))}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="block mb-1 font-semibold text-slate-700">مدير الفرع</label>
+                <input
+                  value={formState.manager}
+                  placeholder="اسم مدير الفرع..."
+                  onChange={(event) => setFormState((prev) => ({ ...prev, manager: event.target.value }))}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="block mb-1 font-semibold text-slate-700">
+                  رابط الموقع (خرائط جوجل / Google Maps)
+                </label>
                 <input
                   type="url"
                   value={formState.location}
                   placeholder="https://maps.google.com/..."
                   dir="ltr"
                   onChange={(event) => setFormState((prev) => ({ ...prev, location: event.target.value }))}
-                  className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3 text-left text-sm text-slate-900 outline-none transition focus:border-sky-500 focus:bg-white placeholder:text-right placeholder:text-slate-400"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-left text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
                 />
-                <span className="block text-xs font-normal text-slate-500">
-                  قم بوضع رابط موقع الفرع على خرائط جوجل لسهولة الانتقال إليه مباشرة.
-                </span>
-              </label>
+              </div>
             </div>
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4">
+
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/50 px-5 py-3">
               <button
                 type="button"
                 onClick={closeBranchModal}
-                className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition"
               >
                 إلغاء
               </button>
               <button
                 type="button"
                 onClick={saveBranch}
-                className="rounded-2xl bg-sky-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-sky-700"
+                className="rounded-xl bg-sky-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-sky-700 transition"
               >
-                حفظ
+                حفظ الفرع
               </button>
             </div>
           </div>
         </div>
       ) : null}
 
+      {/* Delete Confirmation Modal */}
       {branchToDelete ? (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/70 p-4">
-          <div className="w-full max-w-lg overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-slate-200">
-            <div className="border-b border-slate-200 px-6 py-5 text-right">
-              <h3 className="text-xl font-semibold text-slate-900">تأكيد الحذف</h3>
-            </div>
-            <div className="space-y-4 p-6 text-right">
-              <p className="text-slate-700">هل أنت متأكد لحذف الفرع التالي؟</p>
-              <p className="rounded-3xl bg-slate-50 p-4 text-lg font-semibold text-slate-900">{branchToDelete.name}</p>
-              <p className="text-sm text-slate-500">بعد الحذف، لا يمكن استعادة بيانات هذا الفرع بسهولة.</p>
-            </div>
-            <div className="flex flex-wrap items-center justify-end gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
+          <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-xl ring-1 ring-slate-200 p-5 text-right space-y-4">
+            <h3 className="text-base font-bold text-slate-900">تأكيد حذف الفرع</h3>
+            <p className="text-xs text-slate-600">
+              هل أنت متأكد من حذف الفرع <span className="font-bold text-slate-900">{branchToDelete.name}</span>؟
+            </p>
+            <div className="flex items-center justify-end gap-2 pt-2">
               <button
                 type="button"
                 onClick={cancelDeleteBranch}
-                className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
               >
                 إلغاء
               </button>
               <button
                 type="button"
                 onClick={() => deleteBranch(branchToDelete.id)}
-                className="rounded-2xl bg-rose-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-rose-700"
+                className="rounded-xl bg-rose-600 px-4 py-2 text-xs font-semibold text-white hover:bg-rose-700"
               >
                 حذف الفرع
               </button>
             </div>
           </div>
-        </div>
-      ) : null}
-
-      {toast ? (
-        <div className={`fixed bottom-6 left-6 right-6 z-50 mx-auto max-w-md rounded-3xl px-5 py-4 text-sm font-semibold text-white ${toast.type === 'success' ? 'bg-emerald-600' : toast.type === 'warning' ? 'bg-amber-500' : 'bg-rose-500'}`}>
-          {toast.message}
         </div>
       ) : null}
     </div>

@@ -1,5 +1,18 @@
-import { useEffect, useMemo, useState, type ChangeEvent, type Dispatch, type FormEvent, type SetStateAction } from 'react';
+import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from 'react';
 import { jsPDF } from 'jspdf';
+import { Plus, SearchSm, Trash01, File02, CreditCard01 } from '@untitledui/icons';
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip as RechartsTooltip,
+  CartesianGrid,
+  Legend,
+} from 'recharts';
+import AppIcon from '@/components/AppIcon';
+import Pagination from '@/components/Pagination';
 import { useAuth } from '@/contexts/AuthContext';
 
 type FinanceType = 'income' | 'expense';
@@ -38,7 +51,7 @@ type FinanceForm = {
   description: string;
 };
 
-const rowsPerPage = 25;
+const rowsPerPage = 10;
 
 function readStoredData<T>(key: string, fallback: T): T {
   if (typeof window === 'undefined') return fallback;
@@ -98,130 +111,96 @@ function normalizeFinanceFromApi(row: Record<string, unknown>): FinanceEntry | n
     amount: Number(row.amount || 0),
     date: String(row.date || '').slice(0, 10),
     description: String(row.description || ''),
-    createdBy: row.createdBy ? (row.createdBy as FinanceEntry['createdBy']) : null,
   };
 }
 
-export default function FinancePage() {
+export default function Finance() {
   const { canEdit } = useAuth();
   const canEditFinance = canEdit('finance');
+
   const [finances, setFinances] = useState<FinanceEntry[]>(() => readStoredData('finances', []));
   const [branches, setBranches] = useState<Branch[]>(() => readStoredData('branches', []));
+
+  const [search, setSearch] = useState('');
+  const [filterMonth, setFilterMonth] = useState('');
+  const [filterType, setFilterType] = useState<FinanceType | ''>('');
+  const [filterBranch, setFilterBranch] = useState('');
+  const [filterCategory, setFilterCategory] = useState('');
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>('table');
+
+  // Period / Date Range filter states
+  const [periodMode, setPeriodMode] = useState<'all' | 'yearly' | 'monthly' | 'custom'>('all');
+  const [selectedYear, setSelectedYear] = useState<string>(() => new Date().getFullYear().toString());
+  const [selectedMonth, setSelectedMonth] = useState<string>(() => new Date().toISOString().slice(0, 7));
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState<FinanceForm>(emptyForm);
-  const [search, setSearch] = useState('');
-  const [filterType, setFilterType] = useState('');
-  const [filterCategory, setFilterCategory] = useState('');
-  const [filterBranch, setFilterBranch] = useState('');
-  const [filterMonth, setFilterMonth] = useState('');
+  const [formData, setFormData] = useState<FinanceForm>(emptyForm);
+
   const [currentPage, setCurrentPage] = useState(1);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
 
-  // Load from API on mount
   useEffect(() => {
     const loadFromApi = async () => {
       const api = window.api;
-      if (!api?.getFinanceRecords || !api?.getToken?.()) return;
+      if (!api?.getToken?.()) return;
 
       try {
-        const response = await api.getFinanceRecords();
-        const serverData = Array.isArray(response?.data) ? response.data as Record<string, unknown>[] : [];
-        if (serverData.length > 0) {
-          const mapped = serverData.map((item) => normalizeFinanceFromApi(item)).filter(Boolean) as FinanceEntry[];
-          if (mapped.length > 0) {
-            setFinances(mapped);
-            window.localStorage.setItem('finances', JSON.stringify(mapped));
-          }
+        const [resFinances, resBranches] = await Promise.all([
+          api.getFinanceRecords?.(),
+          api.getBranches?.(),
+        ]);
+
+        const serverFinances = Array.isArray((resFinances as { data?: unknown[] })?.data)
+          ? ((resFinances as { data?: unknown[] }).data || [])
+          : [];
+        const mappedFinances = serverFinances
+          .map((item) => normalizeFinanceFromApi(item as Record<string, unknown>))
+          .filter((item): item is FinanceEntry => Boolean(item && item.id));
+
+        if (mappedFinances.length > 0) {
+          setFinances(mappedFinances);
+          window.localStorage.setItem('finances', JSON.stringify(mappedFinances));
+        }
+
+        const serverBranches = Array.isArray((resBranches as { data?: unknown[] })?.data)
+          ? ((resBranches as { data?: unknown[] }).data || [])
+          : [];
+        if (serverBranches.length > 0) {
+          const mappedBranches = serverBranches.map((item) => {
+            const b = item as Record<string, unknown>;
+            return { id: String(b.id || ''), name: String(b.name || '') };
+          });
+          setBranches(mappedBranches);
+          window.localStorage.setItem('branches', JSON.stringify(mappedBranches));
         }
       } catch {
-        // fallback to localStorage
+        // Fallback to local storage
       }
     };
+
     loadFromApi();
   }, []);
 
   useEffect(() => {
-    const syncFromStorage = () => {
+    const handleSync = () => {
       setFinances(readStoredData('finances', []));
-      setBranches(readStoredData('branches', []));
     };
-
-    const onCustomSync = (event: Event) => {
-      const customEvent = event as CustomEvent<{ key?: string; value?: unknown }>;
-      if (customEvent.detail?.key === 'finances') {
-        setFinances(Array.isArray(customEvent.detail.value) ? customEvent.detail.value : []);
-      }
-      if (customEvent.detail?.key === 'branches') {
-        setBranches(Array.isArray(customEvent.detail.value) ? customEvent.detail.value : []);
-      }
-    };
-
-    window.addEventListener('storage', syncFromStorage);
-    window.addEventListener('app:sync', onCustomSync as EventListener);
+    window.addEventListener('storage', handleSync);
+    window.addEventListener('app:sync', handleSync);
     return () => {
-      window.removeEventListener('storage', syncFromStorage);
-      window.removeEventListener('app:sync', onCustomSync as EventListener);
+      window.removeEventListener('storage', handleSync);
+      window.removeEventListener('app:sync', handleSync);
     };
   }, []);
 
-  const handleFilterValueChange = (setter: Dispatch<SetStateAction<string>>) => (event: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    setter(event.target.value);
-    setCurrentPage(1);
-  };
-
   useEffect(() => {
     if (!toast) return;
-    const timer = window.setTimeout(() => setToast(null), 2400);
+    const timer = window.setTimeout(() => setToast(null), 2500);
     return () => window.clearTimeout(timer);
   }, [toast]);
-
-  const monthOptions = useMemo(() => {
-    const months = new Set<string>();
-    finances.forEach((entry) => {
-      if (!entry.date) return;
-      const month = String(entry.date).slice(0, 7);
-      if (month) months.add(month);
-    });
-    return Array.from(months).sort((a, b) => b.localeCompare(a));
-  }, [finances]);
-
-  const filteredFinances = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    return finances.filter((entry) => {
-      const description = String(entry.description || '').toLowerCase();
-      const matchesDescription = !query || description.includes(query);
-      const matchesType = !filterType || entry.type === filterType;
-      const matchesCategory = !filterCategory || entry.category === filterCategory;
-      const matchesBranch = !filterBranch || entry.branch === filterBranch || entry.branchName === filterBranch;
-      const matchesMonth = !filterMonth || (entry.date && String(entry.date).startsWith(filterMonth));
-      return matchesDescription && matchesType && matchesCategory && matchesBranch && matchesMonth;
-    });
-  }, [finances, search, filterType, filterCategory, filterBranch, filterMonth]);
-
-  const summary = useMemo(() => {
-    const income = filteredFinances
-      .filter((entry) => entry.type === 'income')
-      .reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
-
-    const expenses = filteredFinances
-      .filter((entry) => entry.type === 'expense')
-      .reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
-
-    const membershipIncome = filteredFinances
-      .filter((entry) => entry.type === 'income' && entry.category === 'عضويات')
-      .reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
-
-    return {
-      income,
-      expenses,
-      balance: income - expenses,
-      membershipIncome,
-    };
-  }, [filteredFinances]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredFinances.length / rowsPerPage));
-  const paginatedFinances = filteredFinances.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
 
   const showToast = (message: string, type: 'success' | 'error' | 'warning' = 'success') => {
     setToast({ message, type });
@@ -232,21 +211,162 @@ export default function FinancePage() {
     window.localStorage.setItem('finances', JSON.stringify(nextFinances));
   };
 
+  const yearOptions = useMemo(() => {
+    const years = new Set<string>();
+    finances.forEach((entry) => {
+      if (entry.date) {
+        years.add(entry.date.slice(0, 4));
+      }
+    });
+    if (years.size === 0) years.add(new Date().getFullYear().toString());
+    return Array.from(years).sort().reverse();
+  }, [finances]);
+
+  const monthOptions = useMemo(() => {
+    const months = new Set<string>();
+    finances.forEach((entry) => {
+      if (entry.date) {
+        months.add(entry.date.slice(0, 7));
+      }
+    });
+    if (months.size === 0) months.add(new Date().toISOString().slice(0, 7));
+    return Array.from(months).sort().reverse();
+  }, [finances]);
+
+  const categoryOptions = useMemo(() => {
+    const cats = new Set<string>();
+    finances.forEach((entry) => {
+      if (entry.category) cats.add(entry.category);
+    });
+    return Array.from(cats);
+  }, [finances]);
+
+  const filteredFinances = useMemo(() => {
+    return finances.filter((entry) => {
+      const matchesSearch =
+        !search ||
+        (entry.description || '').toLowerCase().includes(search.toLowerCase()) ||
+        (entry.relatedTo || '').toLowerCase().includes(search.toLowerCase()) ||
+        (entry.category || '').toLowerCase().includes(search.toLowerCase());
+
+      const matchesType = !filterType || entry.type === filterType;
+      const matchesBranch =
+        !filterBranch ||
+        entry.branch === filterBranch ||
+        entry.branchName === filterBranch ||
+        entry.branchId === filterBranch;
+      const matchesCategory = !filterCategory || entry.category === filterCategory;
+
+      let matchesPeriod = true;
+      const dateStr = (entry.date || '').slice(0, 10);
+
+      if (periodMode === 'yearly') {
+        matchesPeriod = dateStr.startsWith(selectedYear);
+      } else if (periodMode === 'monthly') {
+        matchesPeriod = dateStr.startsWith(selectedMonth);
+      } else if (periodMode === 'custom') {
+        if (startDate && dateStr < startDate) matchesPeriod = false;
+        if (endDate && dateStr > endDate) matchesPeriod = false;
+      }
+
+      const matchesMonthFallback = !filterMonth || dateStr.startsWith(filterMonth);
+
+      return matchesSearch && matchesType && matchesBranch && matchesCategory && matchesPeriod && matchesMonthFallback;
+    });
+  }, [finances, search, filterType, filterBranch, filterCategory, periodMode, selectedYear, selectedMonth, startDate, endDate, filterMonth]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, filterMonth, filterType, filterBranch, filterCategory, periodMode, selectedYear, selectedMonth, startDate, endDate]);
+
+  const chartData = useMemo(() => {
+    const buckets: Record<string, { name: string; income: number; expense: number }> = {};
+
+    filteredFinances.forEach((entry) => {
+      let key = 'أخرى';
+      if (entry.date) {
+        if (periodMode === 'yearly' || periodMode === 'all') {
+          key = entry.date.slice(0, 7);
+        } else {
+          key = entry.date.slice(0, 10);
+        }
+      }
+
+      if (!buckets[key]) {
+        buckets[key] = { name: key, income: 0, expense: 0 };
+      }
+      const amount = Number(entry.amount || 0);
+      if (entry.type === 'income') {
+        buckets[key].income += amount;
+      } else if (entry.type === 'expense') {
+        buckets[key].expense += amount;
+      }
+    });
+
+    return Object.values(buckets).sort((a, b) => a.name.localeCompare(b.name));
+  }, [filteredFinances, periodMode]);
+
+  const categoryBreakdown = useMemo(() => {
+    const catMap: Record<string, number> = {};
+    filteredFinances.forEach((entry) => {
+      const amt = Number(entry.amount || 0);
+      const cat = entry.category || 'عام';
+      catMap[cat] = (catMap[cat] || 0) + amt;
+    });
+    return Object.entries(catMap)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+  }, [filteredFinances]);
+
+  const summary = useMemo(() => {
+    let income = 0;
+    let expenses = 0;
+    let membershipIncome = 0;
+
+    filteredFinances.forEach((entry) => {
+      const amount = Number(entry.amount || 0);
+      if (entry.type === 'income') {
+        income += amount;
+        if (entry.category === 'عضويات') {
+          membershipIncome += amount;
+        }
+      } else if (entry.type === 'expense') {
+        expenses += amount;
+      }
+    });
+
+    return {
+      income,
+      expenses,
+      balance: income - expenses,
+      membershipIncome,
+    };
+  }, [filteredFinances]);
+
+  const totalPages = Math.ceil(filteredFinances.length / rowsPerPage) || 1;
+  const paginatedFinances = useMemo(() => {
+    const start = (currentPage - 1) * rowsPerPage;
+    return filteredFinances.slice(start, start + rowsPerPage);
+  }, [filteredFinances, currentPage]);
+
   const openModal = (entry?: FinanceEntry) => {
     if (entry) {
-      setEditingId(entry.id ?? null);
-      setForm({
+      setEditingId(entry.id || null);
+      setFormData({
         type: entry.type,
         category: entry.category,
-        branch: entry.branchId || entry.branchName || entry.branch || '',
+        branch: entry.branch || entry.branchName || '',
         relatedTo: entry.relatedTo || '',
-        amount: String(entry.amount ?? ''),
-        date: String(entry.date || '').slice(0, 10),
+        amount: String(entry.amount),
+        date: entry.date,
         description: entry.description || '',
       });
     } else {
       setEditingId(null);
-      setForm(emptyForm);
+      setFormData({
+        ...emptyForm,
+        date: new Date().toISOString().split('T')[0],
+      });
     }
     setIsModalOpen(true);
   };
@@ -254,112 +374,79 @@ export default function FinancePage() {
   const closeModal = () => {
     setIsModalOpen(false);
     setEditingId(null);
-    setForm(emptyForm);
+    setFormData(emptyForm);
   };
 
-  const handleSubmit = async (event: FormEvent) => {
+  const handleFormChange = (
+    field: keyof FinanceForm
+  ) => (event: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+    setFormData((prev) => ({ ...prev, [field]: event.target.value }));
+  };
+
+  const handleSave = async (event: FormEvent) => {
     event.preventDefault();
 
-    const amountNumber = Number(form.amount);
-    if (!form.type || !form.category || !form.relatedTo || Number.isNaN(amountNumber) || !form.date) {
-      showToast('يرجى تعبئة جميع الحقول المطلوبة', 'error');
+    if (!formData.type || !formData.category || !formData.amount || !formData.date) {
+      showToast('يرجى استكمال الحقول المطلوبة', 'warning');
       return;
     }
 
-    const branch = branches.find((item) => item.id === form.branch);
-    const payload: FinanceEntry = {
-      id: editingId || (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}`),
-      type: form.type,
-      category: form.category,
-      branch: branch?.name || form.branch,
-      branchId: branch?.id || '',
-      branchName: branch?.name || '',
-      relatedTo: form.relatedTo,
-      amount: amountNumber,
-      date: form.date,
-      description: form.description,
-      createdBy: (() => {
-        try {
-          const user = JSON.parse(window.localStorage.getItem('loggedInUser') || 'null');
-          return user ? { id: user.id || '', name: user.name || user.email || 'مستخدم محلي', email: user.email || '', role: user.roleKey || user.role || '' } : null;
-        } catch {
-          return null;
-        }
-      })(),
+    const payload = {
+      type: formData.type as FinanceType,
+      category: formData.category,
+      branch: formData.branch,
+      relatedTo: formData.relatedTo,
+      amount: Number(formData.amount),
+      date: formData.date,
+      description: formData.description,
     };
 
-    try {
-      const api = window.api;
-      if (api?.getToken?.() && (api.updateFinance || api.createFinance)) {
+    let nextFinances = [...finances];
+
+    if (window.api?.getToken()) {
+      try {
         if (editingId) {
-          if (api.updateFinance) {
-            await api.updateFinance(editingId, {
-              type: payload.type,
-              category: payload.category,
-              branchId: payload.branchId || null,
-              relatedTo: payload.relatedTo,
-              amount: payload.amount,
-              date: payload.date,
-              description: payload.description,
-            });
-          }
-        } else if (api.createFinance) {
-          await api.createFinance({
-            type: payload.type,
-            category: payload.category,
-            branch_id: payload.branchId || null,
-            related_to: payload.relatedTo,
-            amount: payload.amount,
-            date: payload.date,
-            description: payload.description,
-          });
+          await window.api.updateFinance?.(editingId, payload);
+          nextFinances = nextFinances.map((f) => (f.id === editingId ? { ...f, ...payload } : f));
+          showToast('تم تعديل الحركة بنجاح');
+        } else {
+          const res = await window.api.createFinance?.(payload);
+          const newEntry = (res as { data?: FinanceEntry })?.data;
+          nextFinances = [newEntry || { ...payload, id: `fin_${Date.now()}` }, ...nextFinances];
+          showToast('تم إضافة الحركة بنجاح');
         }
+      } catch (error) {
+        console.error('Failed to save finance via API', error);
+        showToast('تعذر الحفظ عبر الباك إند، تم الحفظ محلياً', 'warning');
       }
-
-      const nextFinances = editingId
-        ? finances.map((entry) => (entry.id === editingId ? payload : entry))
-        : [...finances, payload];
-
-      persistFinances(nextFinances);
-      showToast(editingId ? 'تم تعديل الحركة المالية' : 'تم إضافة الحركة المالية');
-      closeModal();
-      window.dispatchEvent(new CustomEvent('app:sync', { detail: { key: 'finances', value: nextFinances } }));
-    } catch (error) {
-      console.error('Failed to save finance via API, saving locally', error);
-      const nextFinances = editingId
-        ? finances.map((entry) => (entry.id === editingId ? payload : entry))
-        : [...finances, payload];
-
-      persistFinances(nextFinances);
-      showToast(editingId ? 'تم تعديل الحركة المالية محلياً' : 'تم إضافة الحركة المالية محلياً');
-      closeModal();
-      window.dispatchEvent(new CustomEvent('app:sync', { detail: { key: 'finances', value: nextFinances } }));
+    } else {
+      if (editingId) {
+        nextFinances = nextFinances.map((f) => (f.id === editingId ? { ...f, ...payload } : f));
+        showToast('تم تعديل الحركة محلياً');
+      } else {
+        nextFinances = [{ ...payload, id: `fin_${Date.now()}` }, ...nextFinances];
+        showToast('تم إضافة الحركة محلياً');
+      }
     }
+
+    persistFinances(nextFinances);
+    closeModal();
   };
 
-  const handleDelete = async (entryId?: string) => {
-    if (!entryId) return;
-    if (!window.confirm('هل تريد حذف هذه الحركة المالية؟')) return;
+  const handleDelete = async (entryId: string) => {
+    if (!window.confirm('هل أنت متأكد من حذف هذه الحركة المالية؟')) return;
 
-    try {
-      const api = window.api;
-      if (api?.getToken?.() && api.deleteFinance) {
-        await api.deleteFinance(entryId).catch(() => {});
+    if (window.api?.getToken()) {
+      try {
+        await window.api.deleteFinance?.(entryId);
+      } catch (error) {
+        console.error('Failed to delete finance via API', error);
       }
-    } catch (error) {
-      console.error('Failed to delete finance via API', error);
     }
 
     const nextFinances = finances.filter((entry) => entry.id !== entryId);
     persistFinances(nextFinances);
-    showToast('تم حذف الحركة المالية');
-    window.dispatchEvent(new CustomEvent('app:sync', { detail: { key: 'finances', value: nextFinances } }));
-  };
-
-  const syncToDashboard = () => {
-    window.localStorage.setItem('finances', JSON.stringify(finances));
-    window.dispatchEvent(new CustomEvent('app:sync', { detail: { key: 'finances', value: finances } }));
-    showToast('تمت المزامنة مع لوحة التحكم');
+    showToast('تم حذف الحركة المالية بنجاح');
   };
 
   const exportToCsv = () => {
@@ -392,7 +479,7 @@ export default function FinancePage() {
     link.download = 'الماليات.csv';
     link.click();
     URL.revokeObjectURL(url);
-    showToast('تم تصدير الملف بنجاح');
+    showToast('تم تصدير ملف CSV بنجاح');
   };
 
   const exportPdf = (entry: FinanceEntry) => {
@@ -442,293 +529,630 @@ export default function FinancePage() {
   };
 
   return (
-    <div className="space-y-6" dir="rtl">
-      <div className="flex flex-col gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <p className="text-sm font-medium text-slate-500">الإيرادات والمصروفات</p>
-          <h1 className="text-3xl font-semibold text-slate-900">النظام المالي للأكاديمية</h1>
-        </div>
-        <div className="flex flex-wrap gap-3">
-          <button type="button" onClick={syncToDashboard} className="rounded-2xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100">
-            ↻ مزامنة مع الداشبورد
-          </button>
-          {canEditFinance && (
-            <button type="button" onClick={() => openModal()} className="rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-700">
-              + إضافة حركة
-            </button>
-          )}
-          <button type="button" onClick={exportToCsv} className="rounded-2xl bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-700">
-            ⬇ Excel
-          </button>
-        </div>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
-          <p className="text-sm text-emerald-600">إجمالي الدخل</p>
-          <p className="mt-3 text-3xl font-semibold text-slate-900">{formatMoney(summary.income)}</p>
-        </div>
-        <div className="rounded-3xl border border-rose-200 bg-rose-50 p-5 shadow-sm">
-          <p className="text-sm text-rose-600">إجمالي المصروفات</p>
-          <p className="mt-3 text-3xl font-semibold text-slate-900">{formatMoney(summary.expenses)}</p>
-        </div>
-        <div className="rounded-3xl border border-sky-200 bg-sky-50 p-5 shadow-sm">
-          <p className="text-sm text-sky-600">الرصيد الحالي</p>
-          <p className="mt-3 text-3xl font-semibold text-slate-900">{formatMoney(summary.balance)}</p>
-        </div>
-        <div className="rounded-3xl border border-violet-200 bg-violet-50 p-5 shadow-sm">
-          <p className="text-sm text-violet-600">دخل العضويات</p>
-          <p className="mt-3 text-3xl font-semibold text-slate-900">{formatMoney(summary.membershipIncome)}</p>
-        </div>
-      </div>
-
-      <div className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:grid-cols-2 xl:grid-cols-5">
-        <label className="text-sm text-slate-600">
-          <span className="mb-2 block">بحث بالوصف</span>
-          <input
-            value={search}
-            onChange={handleFilterValueChange(setSearch)}
-            className="w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none focus:border-sky-500"
-            placeholder="بحث بالوصف..."
-          />
-        </label>
-        <label className="text-sm text-slate-600">
-          <span className="mb-2 block">الشهر</span>
-          <select
-            value={filterMonth}
-            onChange={handleFilterValueChange(setFilterMonth)}
-            className="w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none focus:border-sky-500"
-          >
-            <option value="">كل الأشهر</option>
-            {monthOptions.map((month) => (
-              <option key={month} value={month}>
-                {formatMonthLabel(month)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-sm text-slate-600">
-          <span className="mb-2 block">النوع</span>
-          <select
-            value={filterType}
-            onChange={handleFilterValueChange(setFilterType)}
-            className="w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none focus:border-sky-500"
-          >
-            <option value="">الكل</option>
-            <option value="income">دخل</option>
-            <option value="expense">مصروف</option>
-          </select>
-        </label>
-        <label className="text-sm text-slate-600">
-          <span className="mb-2 block">الفرع</span>
-          <select
-            value={filterBranch}
-            onChange={handleFilterValueChange(setFilterBranch)}
-            className="w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none focus:border-sky-500"
-          >
-            <option value="">كل الفروع</option>
-            {branches.map((branch) => (
-              <option key={branch.id || branch.name} value={branch.name || ''}>
-                {branch.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-sm text-slate-600">
-          <span className="mb-2 block">الفئة</span>
-          <select
-            value={filterCategory}
-            onChange={handleFilterValueChange(setFilterCategory)}
-            className="w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none focus:border-sky-500"
-          >
-            <option value="">الكل</option>
-            <option value="رواتب">رواتب</option>
-            <option value="عضويات">عضويات</option>
-            <option value="اشتراكات">اشتراكات</option>
-            <option value="مصاريف أخرى">مصاريف أخرى</option>
-          </select>
-        </label>
-      </div>
-
-      <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-200 px-6 py-4">
-          <h2 className="text-xl font-semibold text-slate-900">سجل الحركات المالية</h2>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-right">
-            <thead className="bg-slate-50 text-sm text-slate-600">
-              <tr>
-                <th className="px-4 py-3">التاريخ</th>
-                <th className="px-4 py-3">النوع</th>
-                <th className="px-4 py-3">الفئة</th>
-                <th className="px-4 py-3">الفرع</th>
-                <th className="px-4 py-3">الاسم/الجهة</th>
-                <th className="px-4 py-3">تم بواسطة</th>
-                <th className="px-4 py-3">المبلغ</th>
-                <th className="px-4 py-3">الملاحظات</th>
-                <th className="px-4 py-3">إجراءات</th>
-              </tr>
-            </thead>
-            <tbody>
-              {paginatedFinances.length ? (
-                paginatedFinances.map((entry) => (
-                  <tr key={entry.id} className="border-t border-slate-100 text-sm text-slate-700">
-                    <td className="px-4 py-3">{entry.date}</td>
-                    <td className="px-4 py-3">{entry.type === 'income' ? 'دخل' : 'مصروف'}</td>
-                    <td className="px-4 py-3">{entry.category}</td>
-                    <td className="px-4 py-3">{entry.branchName || entry.branch || '-'}</td>
-                    <td className="px-4 py-3">{entry.relatedTo || '-'}</td>
-                    <td className="px-4 py-3">{entry.createdBy?.name || entry.createdBy?.email || '-'}</td>
-                    <td className="px-4 py-3">{Number(entry.amount || 0).toLocaleString()}</td>
-                    <td className="px-4 py-3">{entry.description || '-'}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-2">
-                        {canEditFinance && (
-                          <button type="button" onClick={() => openModal(entry)} className="rounded-xl border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100">
-                            تعديل
-                          </button>
-                        )}
-                        {canEditFinance && (
-                          <button type="button" onClick={() => handleDelete(entry.id)} className="rounded-xl border border-rose-300 px-3 py-1.5 text-sm text-rose-600 hover:bg-rose-50">
-                            حذف
-                          </button>
-                        )}
-                        <button type="button" onClick={() => exportPdf(entry)} className="rounded-xl bg-sky-600 px-3 py-1.5 text-sm text-white hover:bg-sky-700">
-                          PDF
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={9} className="px-4 py-10 text-center text-slate-500">
-                    لا توجد نتائج مطابقة للبحث
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {filteredFinances.length > rowsPerPage ? (
-          <div className="flex items-center justify-center gap-3 border-t border-slate-200 px-6 py-4">
-            <button
-              type="button"
-              onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
-              disabled={currentPage === 1}
-              className="rounded-2xl border border-slate-300 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              السابق
-            </button>
-            <span className="text-sm text-slate-500">صفحة {currentPage} من {totalPages}</span>
-            <button
-              type="button"
-              onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
-              disabled={currentPage === totalPages}
-              className="rounded-2xl border border-slate-300 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              التالي
-            </button>
-          </div>
-        ) : null}
-      </div>
-
-      {isModalOpen ? (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4">
-          <div className="w-full max-w-xl rounded-3xl bg-white p-6 shadow-2xl">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-xl font-semibold text-slate-900">{editingId ? 'تعديل حركة مالية' : 'إضافة حركة مالية'}</h3>
-              <button type="button" onClick={closeModal} className="text-slate-500 hover:text-slate-800">
-                ✕
-              </button>
-            </div>
-            <form className="space-y-4" onSubmit={handleSubmit}>
-              <select
-                value={form.type}
-                onChange={(event) => setForm((prev) => ({ ...prev, type: event.target.value as FinanceType }))}
-                className="w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none focus:border-sky-500"
-                required
-              >
-                <option value="">اختر النوع</option>
-                <option value="income">دخل</option>
-                <option value="expense">مصروف</option>
-              </select>
-
-              <select
-                value={form.category}
-                onChange={(event) => setForm((prev) => ({ ...prev, category: event.target.value }))}
-                className="w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none focus:border-sky-500"
-                required
-              >
-                <option value="">اختر الفئة</option>
-                <option value="رواتب">رواتب</option>
-                <option value="عضويات">عضويات</option>
-                <option value="اشتراكات">اشتراكات</option>
-                <option value="مصاريف أخرى">مصاريف أخرى</option>
-              </select>
-
-              <select
-                value={form.branch}
-                onChange={(event) => setForm((prev) => ({ ...prev, branch: event.target.value }))}
-                className="w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none focus:border-sky-500"
-              >
-                <option value="">اختر الفرع</option>
-                {branches.map((branch) => (
-                  <option key={branch.id || branch.name} value={branch.id || branch.name || ''}>
-                    {branch.name}
-                  </option>
-                ))}
-              </select>
-
-              <input
-                value={form.relatedTo}
-                onChange={(event) => setForm((prev) => ({ ...prev, relatedTo: event.target.value }))}
-                placeholder="الاسم أو الجهة"
-                className="w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none focus:border-sky-500"
-                required
-              />
-
-              <input
-                type="number"
-                value={form.amount}
-                onChange={(event) => setForm((prev) => ({ ...prev, amount: event.target.value }))}
-                placeholder="المبلغ"
-                className="w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none focus:border-sky-500"
-                required
-              />
-
-              <input
-                type="date"
-                value={form.date}
-                onChange={(event) => setForm((prev) => ({ ...prev, date: event.target.value }))}
-                className="w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none focus:border-sky-500"
-                required
-              />
-
-              <textarea
-                value={form.description}
-                onChange={(event) => setForm((prev) => ({ ...prev, description: event.target.value }))}
-                placeholder="ملاحظات"
-                className="min-h-24 w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none focus:border-sky-500"
-              />
-
-              <div className="flex justify-end gap-3">
-                <button type="button" onClick={closeModal} className="rounded-2xl border border-slate-300 px-4 py-2 text-sm text-slate-700">
-                  إلغاء
-                </button>
-                <button type="submit" className="rounded-2xl bg-sky-600 px-4 py-2 text-sm font-medium text-white">
-                  حفظ
-                </button>
-              </div>
-            </form>
-          </div>
+    <div dir="rtl" className="space-y-5 font-sans">
+      {/* Toast Notification */}
+      {toast ? (
+        <div
+          className={`fixed right-6 top-6 z-50 rounded-2xl px-4 py-3 text-sm font-semibold shadow-xl transition-all ${
+            toast.type === 'success'
+              ? 'bg-emerald-600 text-white'
+              : toast.type === 'warning'
+              ? 'bg-amber-500 text-white'
+              : 'bg-rose-600 text-white'
+          }`}
+        >
+          {toast.message}
         </div>
       ) : null}
 
-      {toast ? (
-        <div className={`fixed left-1/2 top-6 z-[80] -translate-x-1/2 rounded-2xl px-4 py-3 text-sm font-medium shadow-lg ${toast.type === 'error' ? 'bg-rose-600 text-white' : toast.type === 'warning' ? 'bg-amber-500 text-white' : 'bg-emerald-600 text-white'}`}>
-          {toast.message}
+      {/* ── Compact Header Card ── */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <div className="rounded-xl bg-sky-50 p-3 text-sky-600">
+              <AppIcon icon={CreditCard01} className="h-6 w-6" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-slate-900">النظام المالي والمصروفات</h1>
+              <p className="text-xs text-slate-500">إدارة ومتابعة جميع الإيرادات والمصروفات والصافي المالي</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {canEditFinance && (
+              <button
+                type="button"
+                onClick={() => openModal()}
+                className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700"
+              >
+                <Plus className="h-4 w-4" />
+                إضافة حركة
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={exportToCsv}
+              className="rounded-xl bg-sky-600 px-3.5 py-2.5 text-xs font-semibold text-white transition hover:bg-sky-700"
+            >
+              Excel ⬇
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode(viewMode === 'cards' ? 'table' : 'cards')}
+              className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
+            >
+              {viewMode === 'cards' ? 'عرض جدول 📋' : 'عرض كروت 🎴'}
+            </button>
+          </div>
+        </div>
+
+        {/* Compact Stat Cards Grid */}
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 p-3 text-right">
+            <span className="text-xs font-medium text-emerald-600">إجمالي الدخل</span>
+            <p className="mt-1 text-xl font-bold text-emerald-700">{formatMoney(summary.income)}</p>
+          </div>
+          <div className="rounded-xl border border-rose-100 bg-rose-50/50 p-3 text-right">
+            <span className="text-xs font-medium text-rose-600">إجمالي المصروفات</span>
+            <p className="mt-1 text-xl font-bold text-rose-600">{formatMoney(summary.expenses)}</p>
+          </div>
+          <div className="rounded-xl border border-sky-100 bg-sky-50/50 p-3 text-right">
+            <span className="text-xs font-medium text-sky-600">الرصيد الصافي</span>
+            <p className="mt-1 text-xl font-bold text-sky-700">{formatMoney(summary.balance)}</p>
+          </div>
+          <div className="rounded-xl border border-purple-100 bg-purple-50/50 p-3 text-right">
+            <span className="text-xs font-medium text-purple-600">دخل العضويات</span>
+            <p className="mt-1 text-xl font-bold text-purple-700">{formatMoney(summary.membershipIncome)}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Mini Dashboard Charts & Category Analysis ── */}
+      <div className="grid gap-4 lg:grid-cols-[1.8fr_1fr]">
+        {/* Bar Chart Card */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="mb-3 flex items-center justify-between border-b border-slate-100 pb-3">
+            <div>
+              <h3 className="font-bold text-slate-900 text-sm">مؤشر حركة الإيرادات والمصروفات</h3>
+              <p className="text-[11px] text-slate-400">تحليل رصيد الدخل والمصروف بناءً على تصفية الفترة</p>
+            </div>
+            <span className="inline-flex rounded-full bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-700">
+              {periodMode === 'all' && 'كل الأوقات'}
+              {periodMode === 'yearly' && `السنة: ${selectedYear}`}
+              {periodMode === 'monthly' && `الشهر: ${formatMonthLabel(selectedMonth)}`}
+              {periodMode === 'custom' && `من ${startDate || 'البداية'} إلى ${endDate || 'اليوم'}`}
+            </span>
+          </div>
+          <div className="h-60 w-full">
+            {chartData.length === 0 ? (
+              <div className="flex h-full items-center justify-center text-xs text-slate-400">
+                لا توجد بيانات مالية بالفترة المحددة
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={chartData} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="name" stroke="#94a3b8" fontSize={11} tickLine={false} />
+                  <YAxis stroke="#94a3b8" fontSize={11} tickLine={false} tickFormatter={(v) => `${v}`} />
+                  <RechartsTooltip
+                    formatter={(value: number) => [`${value.toLocaleString()} ج.م`, '']}
+                    contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b', borderRadius: '12px', color: '#fff', fontSize: '12px' }}
+                  />
+                  <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '8px' }} />
+                  <Bar dataKey="income" name="الدخل 📈" fill="#10b981" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="expense" name="المصروفات 📉" fill="#f43f5e" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </div>
+
+        {/* Category Summary Breakdown Card */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm flex flex-col justify-between">
+          <div>
+            <div className="mb-3 border-b border-slate-100 pb-3">
+              <h3 className="font-bold text-slate-900 text-sm">توزيع الفئات المالية</h3>
+              <p className="text-[11px] text-slate-400">أعلى الفئات مساهمة بالحسابات</p>
+            </div>
+
+            <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
+              {categoryBreakdown.length === 0 ? (
+                <p className="text-xs text-slate-400 text-center py-6">لا توجد بيانات فئات</p>
+              ) : (
+                categoryBreakdown.map((item) => (
+                  <div key={item.name} className="flex items-center justify-between rounded-xl bg-slate-50 p-2.5">
+                    <span className="text-xs font-semibold text-slate-700">{item.name}</span>
+                    <span className="text-xs font-bold text-slate-900">{formatMoney(item.value)}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="mt-3 border-t border-slate-100 pt-3 flex items-center justify-between text-xs">
+            <span className="text-slate-500 font-medium">إجمالي الحركات:</span>
+            <span className="font-bold text-sky-700 bg-sky-50 px-2.5 py-1 rounded-lg">{filteredFinances.length} حركة</span>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Search & Filter Card with Period Controls ── */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-slate-700">تصفية الفترة:</span>
+            <div className="inline-flex rounded-xl bg-slate-100 p-1">
+              <button
+                type="button"
+                onClick={() => setPeriodMode('all')}
+                className={`rounded-lg px-3 py-1 text-xs font-semibold transition ${periodMode === 'all' ? 'bg-sky-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+              >
+                الكل 🌐
+              </button>
+              <button
+                type="button"
+                onClick={() => setPeriodMode('yearly')}
+                className={`rounded-lg px-3 py-1 text-xs font-semibold transition ${periodMode === 'yearly' ? 'bg-sky-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+              >
+                سنوي 📅
+              </button>
+              <button
+                type="button"
+                onClick={() => setPeriodMode('monthly')}
+                className={`rounded-lg px-3 py-1 text-xs font-semibold transition ${periodMode === 'monthly' ? 'bg-sky-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+              >
+                شهري 🗓️
+              </button>
+              <button
+                type="button"
+                onClick={() => setPeriodMode('custom')}
+                className={`rounded-lg px-3 py-1 text-xs font-semibold transition ${periodMode === 'custom' ? 'bg-sky-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+              >
+                من يوم لليوم ⏱️
+              </button>
+            </div>
+          </div>
+
+          {/* Dynamic Period Control Inputs */}
+          <div className="flex flex-wrap items-center gap-2">
+            {periodMode === 'yearly' && (
+              <select
+                value={selectedYear}
+                onChange={(e) => setSelectedYear(e.target.value)}
+                className="rounded-xl border border-sky-300 bg-sky-50/70 px-3 py-1.5 text-xs font-bold text-sky-800 outline-none"
+              >
+                {yearOptions.map((year) => (
+                  <option key={year} value={year}>سنة {year}</option>
+                ))}
+              </select>
+            )}
+
+            {periodMode === 'monthly' && (
+              <select
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(e.target.value)}
+                className="rounded-xl border border-sky-300 bg-sky-50/70 px-3 py-1.5 text-xs font-bold text-sky-800 outline-none"
+              >
+                {monthOptions.map((month) => (
+                  <option key={month} value={month}>{formatMonthLabel(month)}</option>
+                ))}
+              </select>
+            )}
+
+            {periodMode === 'custom' && (
+              <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-200">
+                <label className="flex items-center gap-1.5 text-xs font-medium text-slate-600">
+                  من:
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800 outline-none focus:border-sky-500"
+                  />
+                </label>
+                <label className="flex items-center gap-1.5 text-xs font-medium text-slate-600">
+                  إلى:
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800 outline-none focus:border-sky-500"
+                  />
+                </label>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="relative flex items-center">
+            <SearchSm className="absolute right-3 h-4 w-4 text-slate-400" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="بحث بالوصف، الجهة أو الفئة..."
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pr-9 pl-3 text-right text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
+            />
+          </div>
+
+          <select
+            value={filterType}
+            onChange={(e) => setFilterType(e.target.value as FinanceType | '')}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-700 outline-none focus:border-sky-500 focus:bg-white"
+          >
+            <option value="">كل المعاملات (دخل/مصروف)</option>
+            <option value="income">دخل فقط 📈</option>
+            <option value="expense">مصروف فقط 📉</option>
+          </select>
+
+          <select
+            value={filterBranch}
+            onChange={(e) => setFilterBranch(e.target.value)}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-700 outline-none focus:border-sky-500 focus:bg-white"
+          >
+            <option value="">كل الفروع</option>
+            {branches.map((b) => (
+              <option key={b.id || b.name} value={b.name || ''}>
+                {b.name}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={filterCategory}
+            onChange={(e) => setFilterCategory(e.target.value)}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-700 outline-none focus:border-sky-500 focus:bg-white"
+          >
+            <option value="">كل الفئات</option>
+            {categoryOptions.map((cat) => (
+              <option key={cat} value={cat}>{cat}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* ── Content View (Cards or Table) ── */}
+      {viewMode === 'cards' ? (
+        /* ── Compact Cards View ── */
+        paginatedFinances.length === 0 ? (
+          <div className="rounded-2xl border border-slate-200 bg-white p-12 text-center text-sm text-slate-400">
+            لا توجد حركات مالية تطابق البحث.
+          </div>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {paginatedFinances.map((entry) => {
+              const isIncome = entry.type === 'income';
+
+              return (
+                <div
+                  key={entry.id || `${entry.date}_${entry.amount}`}
+                  className={`group relative flex flex-col justify-between rounded-2xl border bg-white p-4 shadow-sm transition hover:shadow-md ${
+                    isIncome ? 'border-emerald-100' : 'border-rose-100'
+                  }`}
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-2 border-b border-slate-100 pb-3">
+                      <div>
+                        <span className="font-mono text-[11px] text-slate-400">{entry.date}</span>
+                        <h3 className="font-bold text-slate-900 text-sm mt-0.5">
+                          {entry.relatedTo || entry.category || 'معاملة مالية'}
+                        </h3>
+                      </div>
+
+                      <span
+                        className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-bold ${
+                          isIncome
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : 'bg-rose-50 text-rose-700 border-rose-200'
+                        }`}
+                      >
+                        {isIncome ? 'دخل 📈' : 'مصروف 📉'}
+                      </span>
+                    </div>
+
+                    <div className="mt-3 space-y-2 text-xs text-slate-600">
+                      <div className="flex items-center justify-between bg-slate-50 p-2 rounded-lg">
+                        <span className="text-slate-500">المبلغ:</span>
+                        <span className={`font-bold text-sm ${isIncome ? 'text-emerald-600' : 'text-rose-600'}`}>
+                          {Number(entry.amount).toLocaleString()} ج.م
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between bg-slate-50 p-2 rounded-lg">
+                        <span className="text-slate-500">الفئة والفرع:</span>
+                        <span className="font-medium text-slate-800">
+                          {entry.category} {entry.branch ? `• ${entry.branch}` : ''}
+                        </span>
+                      </div>
+
+                      {entry.description ? (
+                        <div className="bg-slate-50 p-2 rounded-lg text-slate-500 text-[11px]">
+                          {entry.description}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex items-center justify-between gap-2 border-t border-slate-100 pt-3">
+                    <button
+                      type="button"
+                      onClick={() => exportPdf(entry)}
+                      className="rounded-lg bg-slate-100 p-1.5 text-slate-600 hover:bg-slate-200 transition"
+                      title="طباعة السند"
+                    >
+                      <AppIcon icon={File02} className="h-4 w-4" />
+                    </button>
+
+                    {canEditFinance && (
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => openModal(entry)}
+                          className="rounded-lg bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-200 transition"
+                        >
+                          تعديل
+                        </button>
+                        {entry.id && (
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(entry.id!)}
+                            className="rounded-lg bg-rose-50 p-1.5 text-rose-600 hover:bg-rose-100 transition"
+                            title="حذف"
+                          >
+                            <AppIcon icon={Trash01} className="h-4 w-4" />
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )
+      ) : (
+        /* ── Compact Table View ── */
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-right text-xs divide-y divide-slate-200">
+              <thead className="bg-slate-50 text-slate-500">
+                <tr>
+                  <th className="px-4 py-3 font-semibold">التاريخ</th>
+                  <th className="px-4 py-3 font-semibold">النوع</th>
+                  <th className="px-4 py-3 font-semibold">الفئة</th>
+                  <th className="px-4 py-3 font-semibold">الفرع</th>
+                  <th className="px-4 py-3 font-semibold">الجهة/الاسم</th>
+                  <th className="px-4 py-3 font-semibold">المبلغ</th>
+                  <th className="px-4 py-3 font-semibold">الملاحظات</th>
+                  <th className="px-4 py-3 text-center font-semibold">الإجراءات</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 bg-white">
+                {paginatedFinances.map((entry) => {
+                  const isIncome = entry.type === 'income';
+
+                  return (
+                    <tr key={entry.id || `${entry.date}_${entry.amount}`} className="hover:bg-slate-50/70 transition">
+                      <td className="px-4 py-3 font-mono text-slate-600">{entry.date}</td>
+                      <td className="px-4 py-3">
+                        <span
+                          className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold ${
+                            isIncome
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : 'bg-rose-50 text-rose-700 border-rose-200'
+                          }`}
+                        >
+                          {isIncome ? 'دخل 📈' : 'مصروف 📉'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 font-medium text-slate-800">{entry.category}</td>
+                      <td className="px-4 py-3 text-slate-600">{entry.branchName || entry.branch || '-'}</td>
+                      <td className="px-4 py-3 font-bold text-slate-900">{entry.relatedTo || '-'}</td>
+                      <td className={`px-4 py-3 font-bold ${isIncome ? 'text-emerald-600' : 'text-rose-600'}`}>
+                        {Number(entry.amount).toLocaleString()} ج
+                      </td>
+                      <td className="px-4 py-3 text-slate-500 max-w-[200px] truncate">{entry.description || '-'}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => exportPdf(entry)}
+                            className="rounded-lg bg-slate-100 p-1.5 text-slate-600 hover:bg-slate-200 transition"
+                            title="سند PDF"
+                          >
+                            <AppIcon icon={File02} className="h-4 w-4" />
+                          </button>
+
+                          {canEditFinance && (
+                            <button
+                              type="button"
+                              onClick={() => openModal(entry)}
+                              className="rounded-lg bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-200 transition"
+                            >
+                              تعديل
+                            </button>
+                          )}
+                          {canEditFinance && entry.id && (
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(entry.id!)}
+                              className="rounded-lg bg-rose-50 p-1.5 text-rose-600 hover:bg-rose-100 transition"
+                              title="حذف"
+                            >
+                              <AppIcon icon={Trash01} className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+
+                {paginatedFinances.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="px-4 py-10 text-center text-slate-400 text-xs">
+                      لا توجد حركات مالية تطابق البحث.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── Pagination Bar ── */}
+      <Pagination
+        currentPage={currentPage}
+        totalPages={totalPages}
+        totalItems={filteredFinances.length}
+        onPageChange={setCurrentPage}
+        label="حركة"
+      />
+
+      {/* ── Modal Dialog: Add / Edit Finance ── */}
+      {isModalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
+          <div className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-xl ring-1 ring-slate-200">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+              <div className="flex items-center gap-2">
+                <div className="rounded-xl bg-sky-50 p-2.5 text-sky-600">
+                  <AppIcon icon={CreditCard01} className="h-5 w-5" />
+                </div>
+                <h2 className="text-base font-bold text-slate-900">
+                  {editingId ? 'تعديل حركة مالية' : 'إضافة حركة مالية جديدة'}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={closeModal}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form id="financeModalForm" onSubmit={handleSave} className="space-y-4 p-5 text-right text-xs">
+              <div>
+                <label className="block mb-1 font-semibold text-slate-700">نوع الحركة</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setFormData((prev) => ({ ...prev, type: 'income' }))}
+                    className={`rounded-xl py-2.5 text-center font-bold transition border ${
+                      formData.type === 'income'
+                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                        : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    إيراد / دخل 📈
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormData((prev) => ({ ...prev, type: 'expense' }))}
+                    className={`rounded-xl py-2.5 text-center font-bold transition border ${
+                      formData.type === 'expense'
+                        ? 'bg-rose-600 text-white border-rose-600 shadow-xs'
+                        : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    مصروفات 📉
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block mb-1 font-semibold text-slate-700">الفئة</label>
+                <input
+                  required
+                  value={formData.category}
+                  placeholder="مثال: رواتب / اشتراكات / صيانة"
+                  onChange={handleFormChange('category')}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="block mb-1 font-semibold text-slate-700">الفرع</label>
+                <select
+                  value={formData.branch}
+                  onChange={handleFormChange('branch')}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-700 outline-none"
+                >
+                  <option value="">-- اختر الفرع --</option>
+                  {branches.map((b) => (
+                    <option key={b.id || b.name} value={b.name || ''}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block mb-1 font-semibold text-slate-700">الجهة / الاسم المرتبط</label>
+                <input
+                  value={formData.relatedTo}
+                  placeholder="اسم الشخص أو المورد..."
+                  onChange={handleFormChange('relatedTo')}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block mb-1 font-semibold text-slate-700">المبلغ (ج.م)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    required
+                    value={formData.amount}
+                    placeholder="0"
+                    onChange={handleFormChange('amount')}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block mb-1 font-semibold text-slate-700">التاريخ</label>
+                  <input
+                    type="date"
+                    required
+                    value={formData.date}
+                    onChange={handleFormChange('date')}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block mb-1 font-semibold text-slate-700">الوصف / ملاحظات</label>
+                <textarea
+                  rows={2}
+                  value={formData.description}
+                  placeholder="تفاصيل إضافية عن الحركة المالية..."
+                  onChange={handleFormChange('description')}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
+                />
+              </div>
+            </form>
+
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/50 px-5 py-3">
+              <button
+                type="button"
+                onClick={closeModal}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition"
+              >
+                إلغاء
+              </button>
+              <button
+                type="submit"
+                form="financeModalForm"
+                className="rounded-xl bg-sky-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-sky-700 transition"
+              >
+                حفظ الحركة
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
     </div>

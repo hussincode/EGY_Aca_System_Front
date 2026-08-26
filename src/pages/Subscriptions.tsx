@@ -12,6 +12,7 @@ import {
   Trash01,
 } from '@untitledui/icons';
 import AppIcon from '@/components/AppIcon';
+import Pagination from '@/components/Pagination';
 import { useAuth } from '@/contexts/AuthContext';
 
 /* ── Types ──────────────────────────────────────────────────── */
@@ -418,6 +419,19 @@ export default function Subscriptions() {
       return matchesSearch && matchesStatus && matchesPayment && matchesBranch && matchesGame;
     });
   }, [branchFilter, gameFilter, paymentFilter, searchText, statusFilter, subscriptions]);
+
+  const [currentPage, setCurrentPage] = useState(1);
+  const rowsPerPage = 10;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [branchFilter, gameFilter, paymentFilter, searchText, statusFilter]);
+
+  const totalPages = Math.ceil(filteredSubscriptions.length / rowsPerPage) || 1;
+  const paginatedSubscriptions = useMemo(() => {
+    const start = (currentPage - 1) * rowsPerPage;
+    return filteredSubscriptions.slice(start, start + rowsPerPage);
+  }, [filteredSubscriptions, currentPage]);
 
   /* ── Modal & Handler Actions ────────────────────────────────── */
   const openAddSubscription = () => {
@@ -1046,13 +1060,13 @@ export default function Subscriptions() {
       {/* ── Content View (Cards or Table) ── */}
       {viewMode === 'cards' ? (
         /* ── Compact Cards View ── */
-        filteredSubscriptions.length === 0 ? (
+        paginatedSubscriptions.length === 0 ? (
           <div className="rounded-2xl border border-slate-200 bg-white p-12 text-center text-sm text-slate-400">
             لا توجد اشتراكات ممتثلة للبحث.
           </div>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {filteredSubscriptions.map((sub) => {
+            {paginatedSubscriptions.map((sub) => {
               const remaining = getSubscriptionRemaining(sub);
               const endDate = new Date(sub.endDate);
               const isCancelled = sub.status === 'cancelled';
@@ -1223,7 +1237,7 @@ export default function Subscriptions() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
-                {filteredSubscriptions.map((sub) => {
+                {paginatedSubscriptions.map((sub) => {
                   const remaining = getSubscriptionRemaining(sub);
                   const isCancelled = sub.status === 'cancelled';
                   return (
@@ -1283,6 +1297,15 @@ export default function Subscriptions() {
           </div>
         </div>
       )}
+
+      {/* ── Pagination Bar ── */}
+      <Pagination
+        currentPage={currentPage}
+        totalPages={totalPages}
+        totalItems={filteredSubscriptions.length}
+        onPageChange={setCurrentPage}
+        label="اشتراك"
+      />
 
       {/* ── Add / Edit Modal ── */}
       {isSubscriptionModalOpen ? (

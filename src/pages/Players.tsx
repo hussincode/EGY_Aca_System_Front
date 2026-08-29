@@ -124,13 +124,15 @@ function normalizePlayerFromApi(row: Record<string, unknown> | null | undefined)
   if (!row) return null;
   const id = String(row.id || `player_${Date.now()}`);
   const status = String(row.status || 'due');
+  const rawBranch = String((row as Record<string, unknown>).branch_name || row.branch || '');
+  const normalizedBranch = ['null', 'undefined', 'بدون فرع'].includes(rawBranch.trim().toLowerCase()) ? '' : rawBranch.trim();
   return {
     id,
     name: String(row.name || ''),
     age: row.age != null ? Number(row.age) : undefined,
     phone: String(row.phone || ''),
     game: String((row as Record<string, unknown>).game_name || row.game || ''),
-    branch: String((row as Record<string, unknown>).branch_name || row.branch || ''),
+    branch: normalizedBranch,
     status: status === 'paid' ? 'paid' : 'due',
     ambId: String((row as Record<string, unknown>).amb_ref_code || row.ambId || ''),
     photo: String(row.photo || ''),
@@ -499,6 +501,42 @@ export default function Players() {
     }
   };
 
+  const handleDeletePlayersWithoutBranch = async () => {
+    const isWithoutBranch = (player: Player) => {
+      if (!player.branch) return true;
+      const trimmed = player.branch.trim().toLowerCase();
+      return !trimmed || trimmed === 'null' || trimmed === 'undefined' || trimmed === 'بدون فرع';
+    };
+
+    const playersToRemove = players.filter(isWithoutBranch);
+    if (!playersToRemove.length) {
+      setToastMessage('لا يوجد لاعبين بدون فرع');
+      return;
+    }
+
+    if (!window.confirm(`هل أنت تأكد من حذف ${playersToRemove.length} لاعب بدون فرع؟`)) return;
+
+    const idsToRemove = new Set(playersToRemove.map((p) => p.id));
+
+    try {
+      if (window.api?.deletePlayer) {
+        await Promise.all(
+          playersToRemove
+            .filter((p) => isValidGuid(p.id))
+            .map((p) => window.api!.deletePlayer!(p.id).catch((err) => console.error(`Failed to delete player ${p.id}`, err)))
+        );
+      }
+      setPlayers((prev) => prev.filter((player) => !idsToRemove.has(player.id)));
+      setAmbassadorReferrals((prev) => prev.filter((entry) => !idsToRemove.has(entry.playerId)));
+      setToastMessage(`تم حذف ${playersToRemove.length} لاعب بدون فرع بنجاح`);
+    } catch (error) {
+      console.error('Failed to delete players without branch', error);
+      setPlayers((prev) => prev.filter((player) => !idsToRemove.has(player.id)));
+      setAmbassadorReferrals((prev) => prev.filter((entry) => !idsToRemove.has(entry.playerId)));
+      setToastMessage(`تم حذف ${playersToRemove.length} لاعب بدون فرع محلياً`);
+    }
+  };
+
 
 
   const assignCodesToExistingPlayers = () => {
@@ -699,11 +737,7 @@ export default function Players() {
             {canEditPlayers && (
               <button
                 type="button"
-                onClick={() => {
-                  const removedCount = players.filter((player) => !player.branch || !player.branch.trim()).length;
-                  setPlayers((prev) => prev.filter((player) => Boolean(player.branch && player.branch.trim())));
-                  setToastMessage(removedCount > 0 ? `تم حذف ${removedCount} لاعب بدون فرع` : 'لا يوجد لاعبين بدون فرع');
-                }}
+                onClick={handleDeletePlayersWithoutBranch}
                 className="rounded-xl border border-rose-300 bg-rose-50 px-3 py-2.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
               >
                 حذف لاعبين بدون فرع

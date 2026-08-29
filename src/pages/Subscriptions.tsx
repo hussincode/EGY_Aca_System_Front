@@ -173,13 +173,39 @@ function getSubscriptionRemaining(subscription: SubscriptionRecord) {
   return Math.max(0, getSubscriptionTotal(subscription) - getSubscriptionPaid(subscription));
 }
 
+function getEffectiveSubscriptionStatus(sub: SubscriptionRecord | undefined | null): 'active' | 'expired' | 'cancelled' {
+  if (!sub) return 'expired';
+  if (sub.status === 'cancelled') return 'cancelled';
+  if (sub.status === 'expired') return 'expired';
+
+  if (sub.endDate) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const [year, month, day] = sub.endDate.split('-').map(Number);
+    let end: Date;
+    if (year && month && day) {
+      end = new Date(year, month - 1, day, 23, 59, 59, 999);
+    } else {
+      end = new Date(sub.endDate);
+      end.setHours(23, 59, 59, 999);
+    }
+
+    if (!isNaN(end.getTime()) && today > end) {
+      return 'expired';
+    }
+  }
+
+  return 'active';
+}
+
 export default function Subscriptions() {
   const { canEdit } = useAuth();
   const canEditSubs = canEdit('subscriptions');
   const [players, setPlayers] = useState<Player[]>(() => readStorage('players', []));
   const [subscriptions, setSubscriptions] = useState<SubscriptionRecord[]>(() => readStorage('subscriptions', []));
   const [games, setGames] = useState<Game[]>(() => readStorage('games', []));
-  const [, setBranches] = useState<Branch[]>(() => readStorage('branches', []));
+  const [branches, setBranches] = useState<Branch[]>(() => readStorage('branches', []));
 
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -213,30 +239,53 @@ export default function Subscriptions() {
           api.getBranches().catch(() => ({ data: readStorage('branches', []) })),
         ]);
 
-        const rawSubs = Array.isArray(subsResponse?.data) ? subsResponse.data : [];
-        const normalizedSubs: SubscriptionRecord[] = rawSubs.map((item: any) => ({
-          id: String(item.id || ''),
-          playerId: String(item.playerId || item.player_id || ''),
-          player: String(item.player || item.player_name || ''),
-          playerCode: String(item.playerCode || item.player_code || item.playerSerial || ''),
-          game: String(item.game || item.game_name || ''),
-          branch: String(item.branch || item.branch_name || ''),
-          branchId: String(item.branchId || item.branch_id || ''),
-          schedule: String(item.schedule || ''),
-          trainingTime: String(item.trainingTime || item.training_time || ''),
-          sessions: Number(item.sessions || 0),
-          subscriptionValue: Number(item.subscriptionValue ?? item.subscription_value ?? 0),
-          paidAmount: Number(item.paidAmount ?? item.paid_amount ?? 0),
-          startDate: String(item.startDate || item.start_date || ''),
-          endDate: String(item.endDate || item.end_date || ''),
-          status: item.status === 'cancelled' ? 'cancelled' : item.status === 'expired' ? 'expired' : 'active',
-          invoiceNumber: String(item.invoiceNumber || item.invoice_number || ''),
-        }));
+        const loadedPlayers = (playersResponse.data as Player[]) || [];
+        const loadedBranches = (branchesResponse.data as Branch[]) || [];
+        const loadedGames = (gamesResponse.data as Game[]) || [];
 
-        setPlayers((playersResponse.data as Player[]) || []);
+        setPlayers(loadedPlayers);
+        setBranches(loadedBranches);
+        setGames(loadedGames);
+
+        const branchMap = new Map<string, string>();
+        loadedBranches.forEach((b) => {
+          if (b.id && b.name) branchMap.set(b.id, b.name);
+        });
+
+        const playerMap = new Map<string, Record<string, unknown>>();
+        (playersResponse.data as Record<string, unknown>[] || []).forEach((p) => {
+          if (p.id) playerMap.set(String(p.id), p);
+        });
+
+        const rawSubs = Array.isArray(subsResponse?.data) ? subsResponse.data : [];
+        const normalizedSubs: SubscriptionRecord[] = rawSubs.map((item: any) => {
+          const playerId = String(item.playerId || item.player_id || '');
+          const playerObj = playerMap.get(playerId);
+          const rawBranchId = String(item.branchId || item.branch_id || playerObj?.branch_id || playerObj?.branchId || '');
+          const rawBranchName = String(item.branch || item.branch_name || playerObj?.branch_name || playerObj?.branch || branchMap.get(rawBranchId) || '');
+          const cleanBranch = ['null', 'undefined', 'بدون فرع'].includes(rawBranchName.trim().toLowerCase()) ? '' : rawBranchName.trim();
+
+          return {
+            id: String(item.id || ''),
+            playerId,
+            player: String(item.player || item.player_name || playerObj?.name || ''),
+            playerCode: String(item.playerCode || item.player_code || item.playerSerial || playerObj?.player_serial || playerObj?.playerSerial || ''),
+            game: String(item.game || item.game_name || playerObj?.game_name || playerObj?.game || ''),
+            branch: cleanBranch,
+            branchId: rawBranchId,
+            schedule: String(item.schedule || ''),
+            trainingTime: String(item.trainingTime || item.training_time || ''),
+            sessions: Number(item.sessions || 0),
+            subscriptionValue: Number(item.subscriptionValue ?? item.subscription_value ?? 0),
+            paidAmount: Number(item.paidAmount ?? item.paid_amount ?? 0),
+            startDate: String(item.startDate || item.start_date || ''),
+            endDate: String(item.endDate || item.end_date || ''),
+            status: item.status === 'cancelled' ? 'cancelled' : item.status === 'expired' ? 'expired' : 'active',
+            invoiceNumber: String(item.invoiceNumber || item.invoice_number || ''),
+          };
+        });
+
         setSubscriptions(normalizedSubs);
-        setGames((gamesResponse.data as Game[]) || []);
-        setBranches((branchesResponse.data as Branch[]) || []);
 
         window.localStorage.setItem('players', JSON.stringify(playersResponse.data || []));
         window.localStorage.setItem('subscriptions', JSON.stringify(normalizedSubs));
@@ -374,26 +423,31 @@ export default function Subscriptions() {
 
   /* ── Calculations & Metrics ────────────────────────────────── */
   const subscriptionMetrics = useMemo(() => {
-    const today = new Date();
     const items = subscriptions;
     const total = items.length;
-    const active = items.filter((s) => new Date(s.endDate) >= today && s.status !== 'cancelled' && (s.sessions || 0) > 0).length;
+    const active = items.filter((s) => getEffectiveSubscriptionStatus(s) === 'active').length;
     const paid = items.reduce((sum, s) => sum + Number(s.paidAmount || 0), 0);
     const debt = items.reduce((sum, s) => sum + getSubscriptionRemaining(s), 0);
     const expiringSoon = items.filter((s) => {
-      if (s.status === 'cancelled') return false;
-      const endDate = new Date(s.endDate);
-      if (endDate < today) return false;
+      if (getEffectiveSubscriptionStatus(s) !== 'active') return false;
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const [year, month, day] = (s.endDate || '').split('-').map(Number);
+      if (!year || !month || !day) return false;
+      const endDate = new Date(year, month - 1, day);
       const diffDays = Math.ceil((endDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-      return diffDays <= 2;
+      return diffDays >= 0 && diffDays <= 2;
     }).length;
 
     return { total, active, paid, debt, expiringSoon };
   }, [subscriptions]);
 
   const uniqueBranchOptions = useMemo(() => {
-    return Array.from(new Set(subscriptions.map((sub) => sub.branch || '').filter(Boolean))).sort();
-  }, [subscriptions]);
+    const names = new Set<string>();
+    branches.forEach((b) => { if (b.name && b.name.trim()) names.add(b.name.trim()); });
+    subscriptions.forEach((s) => { if (s.branch && s.branch.trim()) names.add(s.branch.trim()); });
+    return Array.from(names).sort();
+  }, [branches, subscriptions]);
 
   const uniqueGameOptions = useMemo(() => {
     return Array.from(new Set(subscriptions.map((sub) => sub.game || '').filter(Boolean))).sort();
@@ -401,20 +455,16 @@ export default function Subscriptions() {
 
   const filteredSubscriptions = useMemo(() => {
     const query = searchText.trim().toLowerCase();
-    const today = new Date();
 
     return subscriptions.filter((sub) => {
       const matchesSearch = !query || sub.player.toLowerCase().includes(query) || sub.game.toLowerCase().includes(query);
       const remaining = getSubscriptionRemaining(sub);
-      const isCancelled = sub.status === 'cancelled';
-      const endDate = new Date(sub.endDate);
-      const isExpired = isCancelled || (endDate < today && (sub.sessions || 0) <= 0);
-      const isActive = !isCancelled && endDate >= today && (sub.sessions || 0) > 0;
+      const effectiveStatus = getEffectiveSubscriptionStatus(sub);
 
       let matchesStatus = true;
-      if (statusFilter === 'active') matchesStatus = isActive;
-      if (statusFilter === 'expired') matchesStatus = isExpired;
-      if (statusFilter === 'cancelled') matchesStatus = isCancelled;
+      if (statusFilter !== 'all') {
+        matchesStatus = effectiveStatus === statusFilter;
+      }
 
       let matchesPayment = true;
       if (paymentFilter === 'hasRemaining') matchesPayment = remaining > 0;
@@ -512,6 +562,11 @@ export default function Subscriptions() {
     const existingSubscription = subscriptions.find((sub) => sub.id === formState.id);
     const paymentDelta = Math.max(0, formState.paidAmount - Number(existingSubscription?.paidAmount || 0));
 
+    const rawBranchName = selectedPlayer?.branch || (selectedPlayer as any)?.branch_name || existingSubscription?.branch || '';
+    const matchedBranch = branches.find((b) => b.name === rawBranchName || b.id === (selectedPlayer as any)?.branch_id || (selectedPlayer as any)?.branchId);
+    const branchName = rawBranchName || matchedBranch?.name || '';
+    const branchId = matchedBranch?.id || (selectedPlayer as any)?.branch_id || (selectedPlayer as any)?.branchId || existingSubscription?.branchId || '';
+
     let subscription: SubscriptionRecord = {
       id: formState.id || createStableId('sub'),
       playerId: selectedPlayer?.id || formState.playerId || existingSubscription?.playerId || '',
@@ -522,8 +577,8 @@ export default function Subscriptions() {
         existingSubscription?.playerCode ||
         `P${createStableId('player').slice(-5)}`,
       game: formState.game,
-      branch: selectedPlayer?.branch || existingSubscription?.branch || '',
-      branchId: selectedPlayer?.branchId || existingSubscription?.branchId || '',
+      branch: branchName,
+      branchId: branchId,
       schedule: formState.schedule.join(', '),
       trainingTime:
         formState.trainingTimeStart && formState.trainingTimeEnd
@@ -904,13 +959,15 @@ export default function Subscriptions() {
     return sub.trainingTime || '-';
   };
 
-  const statusLabel = (status: SubscriptionRecord['status']) => {
+  const statusLabel = (sub: SubscriptionRecord | SubscriptionRecord['status']) => {
+    const status = typeof sub === 'string' ? sub : getEffectiveSubscriptionStatus(sub);
     if (status === 'cancelled') return 'ملغي';
     if (status === 'active') return 'نشط';
     return 'منتهي';
   };
 
-  const statusBadgeStyle = (status: SubscriptionRecord['status']) => {
+  const statusBadgeStyle = (sub: SubscriptionRecord | SubscriptionRecord['status']) => {
+    const status = typeof sub === 'string' ? sub : getEffectiveSubscriptionStatus(sub);
     if (status === 'cancelled') return 'bg-slate-100 text-slate-600 border-slate-200';
     if (status === 'active') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
     return 'bg-rose-50 text-rose-700 border-rose-200';
@@ -1078,11 +1135,19 @@ export default function Subscriptions() {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {paginatedSubscriptions.map((sub) => {
               const remaining = getSubscriptionRemaining(sub);
-              const endDate = new Date(sub.endDate);
-              const isCancelled = sub.status === 'cancelled';
-              const isActive = !isCancelled && endDate >= new Date() && sub.sessions > 0;
+              const effectiveStatus = getEffectiveSubscriptionStatus(sub);
+              const isCancelled = effectiveStatus === 'cancelled';
+              const isActive = effectiveStatus === 'active';
               const hasBalance = remaining > 0 && !isCancelled;
-              const isExpiringSoon = !isCancelled && isActive && Math.ceil((endDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)) <= 2;
+              const isExpiringSoon = !isCancelled && isActive && (() => {
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const [year, month, day] = (sub.endDate || '').split('-').map(Number);
+                if (!year || !month || !day) return false;
+                const endDate = new Date(year, month - 1, day);
+                const diffDays = Math.ceil((endDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                return diffDays >= 0 && diffDays <= 2;
+              })();
 
               return (
                 <div
@@ -1112,8 +1177,8 @@ export default function Subscriptions() {
                         </div>
                       </div>
 
-                      <span className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-bold ${statusBadgeStyle(sub.status)}`}>
-                        {statusLabel(sub.status)}
+                      <span className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-bold ${statusBadgeStyle(sub)}`}>
+                        {statusLabel(sub)}
                       </span>
                     </div>
 
@@ -1237,6 +1302,7 @@ export default function Subscriptions() {
                   <th className="px-4 py-3 font-semibold">الإيصال</th>
                   <th className="px-4 py-3 font-semibold">كود اللاعب</th>
                   <th className="px-4 py-3 font-semibold">اللاعب</th>
+                  <th className="px-4 py-3 font-semibold">الفرع</th>
                   <th className="px-4 py-3 font-semibold">اللعبة</th>
                   <th className="px-4 py-3 font-semibold">أيام التدريب</th>
                   <th className="px-4 py-3 font-semibold">الحصص</th>
@@ -1255,6 +1321,7 @@ export default function Subscriptions() {
                       <td className="px-4 py-3 font-mono font-medium text-slate-700">{sub.invoiceNumber || '-'}</td>
                       <td className="px-4 py-3 font-mono text-slate-500">{sub.playerCode || '-'}</td>
                       <td className="px-4 py-3 font-bold text-slate-900">{sub.player}</td>
+                      <td className="px-4 py-3 text-slate-600 font-medium">{sub.branch || '-'}</td>
                       <td className="px-4 py-3 text-slate-700">{sub.game}</td>
                       <td className="px-4 py-3 text-slate-600">{formattedSchedule(sub)}</td>
                       <td className="px-4 py-3 font-bold text-slate-800">{sub.sessions}</td>
@@ -1265,8 +1332,8 @@ export default function Subscriptions() {
                       </td>
                       <td className="px-4 py-3 text-slate-500">{sub.startDate} إلى {sub.endDate}</td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold ${statusBadgeStyle(sub.status)}`}>
-                          {statusLabel(sub.status)}
+                        <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold ${statusBadgeStyle(sub)}`}>
+                          {statusLabel(sub)}
                         </span>
                       </td>
                       <td className="px-4 py-3">

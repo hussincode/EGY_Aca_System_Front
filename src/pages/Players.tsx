@@ -224,42 +224,38 @@ export default function Players() {
   useEffect(() => {
     const loadFromApi = async () => {
       const api = window.api;
-      if (!api?.getToken?.()) return;
+      if (!api || !api.getToken()) return;
 
-      if (api.getPlayers) {
-        try {
-          const response = await api.getPlayers();
-          const serverPlayers = Array.isArray(response?.data) ? response.data : [];
-          const nextPlayers = serverPlayers
-            .map((item) => normalizePlayerFromApi(item as Record<string, unknown> | null | undefined))
-            .filter((item): item is Player => Boolean(item));
+      try {
+        const response = await api.getPlayers();
+        const serverPlayers = Array.isArray(response?.data) ? response.data : [];
+        const nextPlayers = serverPlayers
+          .map((item) => normalizePlayerFromApi(item as Record<string, unknown> | null | undefined))
+          .filter((item): item is Player => Boolean(item));
 
-          if (nextPlayers.length) {
-            setPlayers(nextPlayers);
-          }
-        } catch (error) {
-          console.error('Failed to load players from API', error);
+        if (nextPlayers.length) {
+          setPlayers(nextPlayers);
         }
+      } catch (error) {
+        console.error('Failed to load players from API', error);
       }
 
-      if (api.getAttendance) {
-        try {
-          const response = await api.getAttendance();
-          const serverAttendance = Array.isArray(response?.data) ? response.data : [];
-          const normalizedAttendance: AttendanceRecord[] = serverAttendance.map((item: any) => ({
-            id: String(item.id || ''),
-            playerId: String(item.player_id || item.playerId || ''),
-            player_id: String(item.player_id || item.playerId || ''),
-            status: String(item.status || 'present'),
-            date: String(item.date || '').slice(0, 10),
-          }));
-          if (normalizedAttendance.length) {
-            setAttendance(normalizedAttendance);
-            window.localStorage.setItem('attendanceRecords', JSON.stringify(normalizedAttendance));
-          }
-        } catch (error) {
-          console.error('Failed to load attendance from API in Players', error);
+      try {
+        const response = await api.getAttendance();
+        const serverAttendance = Array.isArray(response?.data) ? response.data : [];
+        const normalizedAttendance: AttendanceRecord[] = serverAttendance.map((item: any) => ({
+          id: String(item.id || ''),
+          playerId: String(item.player_id || item.playerId || ''),
+          player_id: String(item.player_id || item.playerId || ''),
+          status: String(item.status || 'present'),
+          date: String(item.date || '').slice(0, 10),
+        }));
+        if (normalizedAttendance.length) {
+          setAttendance(normalizedAttendance);
+          window.localStorage.setItem('attendanceRecords', JSON.stringify(normalizedAttendance));
         }
+      } catch (error) {
+        console.error('Failed to load attendance from API in Players', error);
       }
     };
 
@@ -542,11 +538,11 @@ export default function Players() {
     const idsToRemove = new Set(playersToRemove.map((p) => p.id));
 
     try {
-      if (window.api?.deletePlayer) {
+      if (window.api) {
         await Promise.all(
           playersToRemove
             .filter((p) => isValidGuid(p.id))
-            .map((p) => window.api!.deletePlayer!(p.id).catch((err) => console.error(`Failed to delete player ${p.id}`, err)))
+            .map((p) => window.api!.deletePlayer(p.id).catch((err: unknown) => console.error(`Failed to delete player ${p.id}`, err)))
         );
       }
       setPlayers((prev) => prev.filter((player) => !idsToRemove.has(player.id)));

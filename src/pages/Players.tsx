@@ -38,7 +38,7 @@ type Player = {
 type Branch = { id: string; name: string };
 type Game = { id: string; name: string };
 type TrainingSchedule = { id: string; branch?: string | { id: string }; sport?: string | { id: string }; day?: string; startTime?: string; endTime?: string };
-type AttendanceRecord = { id: string; playerId: string; status: 'present' | 'absent' | string; date: string };
+type AttendanceRecord = { id: string; playerId?: string; player_id?: string; status: 'present' | 'absent' | 'late' | string; date: string };
 type SubscriptionRecord = { id: string; playerId?: string; player?: string; status?: string; sessions?: number; endDate?: string };
 type AmbassadorReferral = {
   playerId: string;
@@ -222,25 +222,48 @@ export default function Players() {
   }, [toastMessage]);
 
   useEffect(() => {
-    const loadPlayersFromApi = async () => {
-      if (!window.api?.getPlayers || !window.api.getToken?.()) return;
+    const loadFromApi = async () => {
+      const api = window.api;
+      if (!api?.getToken?.()) return;
 
-      try {
-        const response = await window.api.getPlayers();
-        const serverPlayers = Array.isArray(response?.data) ? response.data : [];
-        const nextPlayers = serverPlayers
-          .map((item) => normalizePlayerFromApi(item as Record<string, unknown> | null | undefined))
-          .filter((item): item is Player => Boolean(item));
+      if (api.getPlayers) {
+        try {
+          const response = await api.getPlayers();
+          const serverPlayers = Array.isArray(response?.data) ? response.data : [];
+          const nextPlayers = serverPlayers
+            .map((item) => normalizePlayerFromApi(item as Record<string, unknown> | null | undefined))
+            .filter((item): item is Player => Boolean(item));
 
-        if (nextPlayers.length) {
-          setPlayers(nextPlayers);
+          if (nextPlayers.length) {
+            setPlayers(nextPlayers);
+          }
+        } catch (error) {
+          console.error('Failed to load players from API', error);
         }
-      } catch (error) {
-        console.error('Failed to load players from API', error);
+      }
+
+      if (api.getAttendance) {
+        try {
+          const response = await api.getAttendance();
+          const serverAttendance = Array.isArray(response?.data) ? response.data : [];
+          const normalizedAttendance: AttendanceRecord[] = serverAttendance.map((item: any) => ({
+            id: String(item.id || ''),
+            playerId: String(item.player_id || item.playerId || ''),
+            player_id: String(item.player_id || item.playerId || ''),
+            status: String(item.status || 'present'),
+            date: String(item.date || '').slice(0, 10),
+          }));
+          if (normalizedAttendance.length) {
+            setAttendance(normalizedAttendance);
+            window.localStorage.setItem('attendanceRecords', JSON.stringify(normalizedAttendance));
+          }
+        } catch (error) {
+          console.error('Failed to load attendance from API in Players', error);
+        }
       }
     };
 
-    void loadPlayersFromApi();
+    void loadFromApi();
   }, []);
 
   const activeSubscriptionPlayerSet = useMemo(() => {
@@ -555,9 +578,9 @@ export default function Players() {
     const result: Record<string, Array<{ name: string; photo?: string; rate: number }>> = {};
     players.forEach((player) => {
       const branch = player.branch || 'الفرع الرئيسي';
-      const logs = attendance.filter((record) => record.playerId === player.id && record.date.startsWith(monthKey));
-      const present = logs.filter((record) => record.status === 'present').length;
-      const total = logs.filter((record) => record.status === 'present' || record.status === 'absent').length;
+      const logs = attendance.filter((record) => (record.player_id === player.id || record.playerId === player.id) && record.date.startsWith(monthKey));
+      const present = logs.filter((record) => record.status === 'present' || record.status === 'late').length;
+      const total = logs.filter((record) => ['present', 'absent', 'late'].includes(record.status)).length;
       const rate = total > 0 ? Math.round((present / total) * 100) : 0;
       if (total > 0) {
         if (!result[branch]) result[branch] = [];
@@ -810,9 +833,9 @@ export default function Players() {
                 </tr>
               ) : (
                 paginatedPlayers.map((player) => {
-                  const attendanceForPlayer = attendance.filter((record) => record.playerId === player.id);
-                  const presentCount = attendanceForPlayer.filter((record) => record.status === 'present').length;
-                  const totalMarked = attendanceForPlayer.filter((record) => ['present', 'absent'].includes(record.status)).length;
+                  const attendanceForPlayer = attendance.filter((record) => record.player_id === player.id || record.playerId === player.id);
+                  const presentCount = attendanceForPlayer.filter((record) => record.status === 'present' || record.status === 'late').length;
+                  const totalMarked = attendanceForPlayer.filter((record) => ['present', 'absent', 'late'].includes(record.status)).length;
                   const rate = totalMarked > 0 ? Math.round((presentCount / totalMarked) * 100) : 0;
                   return (
                     <tr key={player.id} className="hover:bg-slate-50/70 transition">

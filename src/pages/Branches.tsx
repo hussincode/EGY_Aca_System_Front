@@ -130,6 +130,44 @@ async function fetchJson<T = unknown>(url: string, options: RequestInit = {}) {
   return payload as T;
 }
 
+function syncBranchesToLanding(branchList: Branch[]) {
+  if (typeof window === 'undefined') return;
+  try {
+    const landingBranches = branchList.map((b) => ({
+      id: b.id,
+      name: b.name,
+      description: b.location ? `الموقع: ${b.location} | المدير: ${b.manager || 'إدارة الأكاديمية'}` : `المدير: ${b.manager || 'إدارة الأكاديمية'}`,
+      address: b.location || 'العنوان الرئيسي للأكاديمية',
+      hours: '6:00 AM - 10:00 PM Daily',
+      mapsUrl: /^https?:\/\//i.test(b.location || '') ? b.location : '',
+      image: '/assets/football_card.jpg',
+      features: ['ملاعب معتمدة', 'استراحة أولياء الأمور', 'مرافق رياضية شمولية'],
+    }));
+
+    window.localStorage.setItem('landing_branches', JSON.stringify(landingBranches));
+
+    try {
+      const bc = new BroadcastChannel('landing_settings_sync');
+      bc.postMessage({ landing_branches: landingBranches });
+      bc.close();
+    } catch {}
+
+    window.dispatchEvent(new Event('storage'));
+    window.dispatchEvent(new CustomEvent('app:sync', { detail: { key: 'landing_branches', value: landingBranches } }));
+
+    const urls = ['http://localhost:5000/api/landing-settings', `${API_BASE_URL}/api/landing-settings`];
+    urls.forEach((url) => {
+      fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ landing_branches: landingBranches }),
+      }).catch(() => {});
+    });
+  } catch (err) {
+    console.warn('Sync branches to landing failed:', err);
+  }
+}
+
 export default function Branches() {
   const { canEdit } = useAuth();
   const canEditBranches = canEdit('branches');
@@ -179,6 +217,7 @@ export default function Branches() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(BRANCHES_KEY, JSON.stringify(branches));
+    syncBranchesToLanding(branches);
   }, [branches]);
 
   useEffect(() => {

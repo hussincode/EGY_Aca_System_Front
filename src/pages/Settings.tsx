@@ -22,6 +22,8 @@ type LandingHeroSettings = {
   videoUrl: string;
   bgType: string;
   imageUrl: string;
+  badgeText?: string;
+  ctaPrimary?: string;
 };
 
 type LandingBranchItem = {
@@ -163,8 +165,8 @@ export default function Settings() {
   // Landing Page Settings States
   const [heroSettings, setHeroSettings] = useState<LandingHeroSettings>(() =>
     readJson('landing_hero_settings', {
-      title: '',
-      subtitle: '',
+      title: 'اصنع مستقبلك الرياضي معنا',
+      subtitle: 'أكاديمية رياضية متكاملة لبناء الأبطال وتنمية المهارات بأعلى المستويات المعيارية.',
       videoUrl: '',
       bgType: 'video',
       imageUrl: '',
@@ -178,12 +180,20 @@ export default function Settings() {
   const [branchMapsUrl, setBranchMapsUrl] = useState('');
   const [branchImageData, setBranchImageData] = useState('');
   const [branchImagePreview, setBranchImagePreview] = useState('');
-  const [landingBranches, setLandingBranches] = useState<LandingBranchItem[]>(() => readJson('landing_branches', []));
-  const [testimonials, setTestimonials] = useState<LandingTestimonialItem[]>(() => readJson('landing_testimonials', []));
+  const [landingBranches, setLandingBranches] = useState<LandingBranchItem[]>(() => readJson('landing_branches', [
+    { name: 'فرع دبي هيلز الرئيسي', description: 'دبي هيلز استيت، طريق الكلب هاوس', mapsUrl: '', image: '/assets/football_card.jpg' },
+    { name: 'فرع سيتي سنتر', description: 'مجمع داون تاون الرياضي، شارع ٤', mapsUrl: '', image: '/assets/tennis_card.jpg' },
+  ]));
+  const [testimonials, setTestimonials] = useState<LandingTestimonialItem[]>(() => readJson('landing_testimonials', [
+    { name: 'سارة م.', role: 'والدة مايا (٩ سنوات)', text: 'جاءت ابنتي للتنس، ولكنها استمرت بفضل الصداقات، الثقة بالنفس، والأسلوب الرائع.', rating: '5', image: '/assets/tennis_card.jpg' }
+  ]));
   const [testimonialForm, setTestimonialForm] = useState({ name: '', role: '', text: '', rating: '5', image: '' });
   const [testimonialPreview, setTestimonialPreview] = useState('');
   const [planForm, setPlanForm] = useState({ originalPrice: '', name: '', price: '', features: '', isFeatured: false });
-  const [plans, setPlans] = useState<LandingPlanItem[]>(() => readJson('landing_pricing_plans', []));
+  const [plans, setPlans] = useState<LandingPlanItem[]>(() => readJson('landing_pricing_plans', [
+    { name: 'باقة البداية Starter', originalPrice: null, price: '195', features: ['حصتان تدريبيتان أسبوعياً', 'قميص التدريب الرسمي', 'تطبيق متابعة التطور'], isFeatured: false },
+    { name: 'الباقة الاحترافية Pro', originalPrice: '390', price: '310', features: ['٤ حصص تدريبية أسبوعياً', 'طقم رياضي احترافي كامل', 'تقييم مهارات فردي كل ٣ أشهر', 'تسجيل مجاني في البطولات'], isFeatured: true },
+  ]));
   const [mediaItems, setMediaItems] = useState<LandingMediaItem[]>(() => readJson('landing_media', []));
   const [newsForm, setNewsForm] = useState({ title: '', category: '', date: '', link: '', image: '' });
   const [newsPreview, setNewsPreview] = useState('');
@@ -194,8 +204,24 @@ export default function Settings() {
   const [sportDesc, setSportDesc] = useState('');
   const [sportImage, setSportImage] = useState('');
   const [sportImagePreview, setSportImagePreview] = useState('');
-  const [landingSports, setLandingSports] = useState<LandingSportItem[]>(() => readJson('landing_sports', []));
-  const [sectionTitle, setSectionTitle] = useState(() => readString('landing_sports_title'));
+  const [landingSports, setLandingSports] = useState<LandingSportItem[]>(() => readJson('landing_sports', [
+    { name: 'أكاديمية كرة القدم', tag: 'كرة القدم', desc: 'تكتيكات اللعب، المهارات الفردية، والعمل الجماعي على ملاعب معتمدة من الفيفا.', image: '/assets/football_card.jpg' },
+    { name: 'مسار السباحة الأولمبية', tag: 'السباحة', desc: 'إتقان السباحة، السلامة المائية، واللياقة البدنية في مسبح أولمبي مغلق.', image: '/assets/swimming_card.jpg' },
+    { name: 'احتراف التنس', tag: 'التنس', desc: 'إتقان الإرسال والضربات الخلفية والتركيز الذهني.', image: '/assets/tennis_card.jpg' },
+  ]));
+  const [sectionTitle, setSectionTitle] = useState(() => readString('landing_sports_title') || 'برامجنا الرياضية');
+  const [landingFaq, setLandingFaq] = useState<Array<{ q: string; a: string }>>(() => readJson('landing_faq', [
+    { q: 'ما هي الفئات العمرية المتاحة بالأكاديمية؟', a: 'نقدم برامج مخصصة للأطفال والشباب من سن ٣ حتى ١٧ سنة مقسمة بدقة حسب الفئة العمرية والمستوى.' },
+    { q: 'هل توفرون حصصاً تجريبية قبل الاشتراك؟', a: 'بالتأكيد! نشجع كل طفل على الانضمام لحصة تجريبية مجانية مدتها ٤٥ دقيقة.' }
+  ]));
+  const [faqForm, setFaqForm] = useState({ q: '', a: '' });
+  const [landingFooter, setLandingFooter] = useState(() => readJson('landing_footer', {
+    tagline: 'حركة. تواصل. نمو وتطور معاً.',
+    rights: '© 2026 أكاديمية أبكس الرياضية. جميع الحقوق محفوظة.',
+    phone: '+971 4 800 APEX',
+    email: 'info@apexacademy.ae',
+    address: 'دبي، الإمارات العربية المتحدة',
+  }));
 
   // Audit Logs Filtration States
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
@@ -206,6 +232,32 @@ export default function Settings() {
   const [auditTotalPages, setAuditTotalPages] = useState(1);
   const [auditLoading, setAuditLoading] = useState(false);
 
+  // Load landing settings from backend on mount
+  useEffect(() => {
+    const fetchBackendLandingData = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/landing-settings`);
+        if (res.ok) {
+          const json = await res.json();
+          const d = json?.data;
+          if (d && typeof d === 'object') {
+            if (d.landing_hero_settings) setHeroSettings(d.landing_hero_settings);
+            if (Array.isArray(d.landing_branches) && d.landing_branches.length > 0) setLandingBranches(d.landing_branches);
+            if (Array.isArray(d.landing_sports) && d.landing_sports.length > 0) setLandingSports(d.landing_sports);
+            if (Array.isArray(d.landing_pricing_plans) && d.landing_pricing_plans.length > 0) setPlans(d.landing_pricing_plans);
+            if (Array.isArray(d.landing_testimonials) && d.landing_testimonials.length > 0) setTestimonials(d.landing_testimonials);
+            if (Array.isArray(d.landing_faq) && d.landing_faq.length > 0) setLandingFaq(d.landing_faq);
+            if (d.landing_footer) setLandingFooter(d.landing_footer);
+            if (d.landing_sports_title) setSectionTitle(d.landing_sports_title);
+          }
+        }
+      } catch (err) {
+        console.warn('Landing data backend fetch skipped:', err);
+      }
+    };
+    void fetchBackendLandingData();
+  }, []);
+
   useEffect(() => {
     writeJson('landing_hero_settings', heroSettings);
   }, [heroSettings]);
@@ -213,6 +265,7 @@ export default function Settings() {
   useEffect(() => {
     writeJson('system_settings_general', general);
   }, [general]);
+
 
   useEffect(() => {
     if (!toast) return;
@@ -796,6 +849,74 @@ export default function Settings() {
     showToast('تم حفظ عنوان قسم الرياضات', 'success');
   };
 
+  const addLandingFaq = () => {
+    if (!faqForm.q.trim() || !faqForm.a.trim()) {
+      showToast('يرجى كتابة السؤال والإجابة', 'error');
+      return;
+    }
+    const next = [...landingFaq, { q: faqForm.q.trim(), a: faqForm.a.trim() }];
+    setLandingFaq(next);
+    writeJson('landing_faq', next);
+    setFaqForm({ q: '', a: '' });
+    showToast('تمت إضافة السؤال بنجاح', 'success');
+  };
+
+  const deleteLandingFaq = (index: number) => {
+    const next = landingFaq.filter((_, i) => i !== index);
+    setLandingFaq(next);
+    writeJson('landing_faq', next);
+  };
+
+  const saveAllLandingSettings = async () => {
+    const fullPayload = {
+      landing_hero_settings: heroSettings,
+      landing_hero_image: heroImagePreview,
+      landing_branches: landingBranches,
+      landing_sports: landingSports,
+      landing_sports_title: sectionTitle,
+      landing_pricing_plans: plans,
+      landing_testimonials: testimonials,
+      landing_faq: landingFaq,
+      landing_footer: landingFooter,
+      landing_ceo_photo: ceoPhotoUrl,
+    };
+
+    writeJson('landing_settings_full', fullPayload);
+    writeJson('landing_hero_settings', heroSettings);
+    writeJson('landing_branches', landingBranches);
+    writeJson('landing_sports', landingSports);
+    writeJson('landing_pricing_plans', plans);
+    writeJson('landing_testimonials', testimonials);
+    writeJson('landing_faq', landingFaq);
+    writeJson('landing_footer', landingFooter);
+
+    broadcastLandingChange('landing_full', fullPayload);
+
+    const targetUrls = new Set([
+      'http://localhost:5000/api/landing-settings',
+      `${API_BASE_URL}/api/landing-settings`,
+    ]);
+
+    let savedOk = false;
+    for (const url of targetUrls) {
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(fullPayload),
+        });
+        if (res.ok) savedOk = true;
+      } catch {}
+    }
+
+    if (savedOk) {
+      showToast('تم حفظ ونشر جميع تعديلات اللاندنج بيدج في الباك إند بنجاح 🚀', 'success');
+    } else {
+      showToast('تم حفظ التعديلات وبثها محلياً بنجاح ⚡', 'success');
+    }
+  };
+
+
   const tabButtonClass = (tab: TabKey) =>
     `rounded-2xl border px-5 py-3 text-xs md:text-sm font-bold transition-all ${
       activeTab === tab ? 'border-sky-600 bg-sky-600 text-white shadow-md shadow-sky-600/20' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
@@ -1080,109 +1201,494 @@ export default function Settings() {
       {/* ───────────────────────────────────────────────────────────── */}
       {activeTab === 'landing' ? (
         <div className={tabContentClass}>
-          {/* Live Preview Header Card */}
+          {/* Header Action Bar with Master Save */}
           <div className="overflow-hidden rounded-3xl bg-slate-900 text-white shadow-xl ring-1 ring-slate-800">
             <div className="flex flex-col gap-4 border-b border-slate-800 p-6 md:flex-row md:items-center md:justify-between">
               <div>
                 <div className="flex items-center gap-2">
                   <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                  <span className="text-xs font-semibold uppercase tracking-wider text-emerald-400">معاينة حية ومباشرة (Live Preview)</span>
+                  <span className="text-xs font-semibold uppercase tracking-wider text-emerald-400">لوحة التحكم المركزية باللاندنج بيدج</span>
                 </div>
-                <h2 className="mt-1 text-2xl font-bold text-white">معاينة واجهة اللاندنج بيدج</h2>
-                <p className="mt-1 text-xs text-slate-400">أي تعديل في المدخلات بالأسفل ينعكس فوراً في هذه المعاينة.</p>
+                <h2 className="mt-1 text-2xl font-bold text-white">إدارة محتوى ومكونات اللاندنج بيدج بالكامل</h2>
+                <p className="mt-1 text-xs text-slate-400">التحكم الكامل في الهيرو، الفروع، الرياضات، الأسعار، الآراء، الأسئلة الشائعة وتحديث الباك إند.</p>
               </div>
-              <div className="flex items-center gap-3">
-                <a
-                  href="https://egyacaback.vercel.app"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 rounded-2xl bg-sky-600 px-5 py-3 text-sm font-semibold text-white shadow-lg transition hover:bg-sky-500"
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={saveAllLandingSettings}
+                  className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-600/30 transition hover:bg-emerald-500"
                 >
-                  <span>فتح اللاندنج بيدج الكاملة ↗</span>
-                </a>
+                  <span>💾 حفظ ونشر التعديلات بالكامل</span>
+                </button>
               </div>
             </div>
 
-            {/* Simulated Hero Section */}
-            <div className="relative min-h-[240px] w-full overflow-hidden bg-slate-950 p-8 flex flex-col justify-end">
+            {/* Live Preview Bar */}
+            <div className="relative min-h-[160px] w-full overflow-hidden bg-slate-950 p-6 flex flex-col justify-end">
               {heroSettings.bgType === 'video' && heroSettings.videoUrl ? (
-                <video key={heroSettings.videoUrl} autoPlay muted loop playsInline className="absolute inset-0 h-full w-full object-cover opacity-50">
+                <video key={heroSettings.videoUrl} autoPlay muted loop playsInline className="absolute inset-0 h-full w-full object-cover opacity-40">
                   <source src={heroSettings.videoUrl} type="video/mp4" />
                 </video>
               ) : heroImagePreview || heroSettings.imageUrl ? (
-                <img src={heroImagePreview || heroSettings.imageUrl} alt="Hero Preview" className="absolute inset-0 h-full w-full object-cover opacity-50" />
+                <img src={heroImagePreview || heroSettings.imageUrl} alt="Hero Preview" className="absolute inset-0 h-full w-full object-cover opacity-40" />
               ) : (
                 <div className="absolute inset-0 bg-gradient-to-r from-slate-900 via-sky-950 to-slate-900 opacity-90" />
               )}
-              <div className="relative z-10 space-y-2">
-                <h1 className="text-2xl md:text-3xl font-extrabold text-white">{heroSettings.title || 'اصنع مستقبلك الرياضي معنا'}</h1>
-                <p className="max-w-xl text-xs md:text-sm text-slate-300">{heroSettings.subtitle || 'أكاديمية ايجي سبورتنج لبناء الأبطال'}</p>
+              <div className="relative z-10 space-y-1">
+                <span className="inline-block rounded-full bg-orange-600/80 px-3 py-1 text-[10px] font-bold text-white backdrop-blur-md">
+                  {heroSettings.badgeText || '8K+ Active Players'}
+                </span>
+                <h1 className="text-xl md:text-2xl font-extrabold text-white">{heroSettings.title || 'اصنع مستقبلك الرياضي معنا'}</h1>
+                <p className="max-w-xl text-xs text-slate-300 line-clamp-1">{heroSettings.subtitle || 'أكاديمية ايجي سبورتنج لبناء الأبطال'}</p>
               </div>
             </div>
           </div>
 
-          <div className="grid gap-6 lg:grid-cols-2">
-            <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200/70 space-y-4">
-              <h2 className="text-lg font-bold text-slate-900 border-b border-slate-100 pb-3">إعدادات الهيرو (Hero Section)</h2>
+          {/* Section 1: Hero & Media */}
+          <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200/70 space-y-4">
+            <h3 className="text-lg font-bold text-slate-900 border-b border-slate-100 pb-3">🎯 1. إعدادات الهيرو والإعلان الرئيسي</h3>
+            <div className="grid gap-4 md:grid-cols-2">
               <label className="block text-xs font-bold text-slate-700">
-                العنوان الرئيسي
+                العنوان الرئيسي (Title)
                 <input
                   value={heroSettings.title}
                   onChange={(e) => setHeroSettings((prev) => ({ ...prev, title: e.target.value }))}
-                  className="mt-1 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs text-slate-900 outline-none"
+                  className="mt-1 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
                   placeholder="العنوان الرئيسي"
                 />
               </label>
               <label className="block text-xs font-bold text-slate-700">
-                الوصف الفرعي
-                <textarea
-                  value={heroSettings.subtitle}
-                  onChange={(e) => setHeroSettings((prev) => ({ ...prev, subtitle: e.target.value }))}
-                  className="mt-1 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs text-slate-900 outline-none"
-                  rows={2}
-                  placeholder="وصف مختصر"
+                نص الشارة العلوية (Badge Text)
+                <input
+                  value={heroSettings.badgeText || ''}
+                  onChange={(e) => setHeroSettings((prev) => ({ ...prev, badgeText: e.target.value }))}
+                  className="mt-1 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
+                  placeholder="8K+ Active Players — The #1 Choice"
                 />
               </label>
+            </div>
+            <label className="block text-xs font-bold text-slate-700">
+              الوصف الفرعي (Subtitle)
+              <textarea
+                value={heroSettings.subtitle}
+                onChange={(e) => setHeroSettings((prev) => ({ ...prev, subtitle: e.target.value }))}
+                className="mt-1 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
+                rows={2}
+                placeholder="وصف مختصر للخدمات والبرامج"
+              />
+            </label>
+            <div className="grid gap-4 md:grid-cols-2">
               <label className="block text-xs font-bold text-slate-700">
-                فيديو الخلفية (رابط mp4)
+                رابط فيديو الخلفية (Direct MP4 URL)
                 <input
                   value={heroSettings.videoUrl}
                   onChange={(e) => setHeroSettings((prev) => ({ ...prev, videoUrl: e.target.value }))}
-                  className="mt-1 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs text-slate-900 outline-none"
-                  placeholder="رابط فيديو خلفية الهيرو"
+                  className="mt-1 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
+                  placeholder="https://example.com/video.mp4"
                 />
               </label>
-              <label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs font-bold text-slate-700">
-                <span>📷 رفع صورة خلفية</span>
-                <input type="file" accept="image/*" hidden onChange={uploadHeroImage} />
-              </label>
+              <div className="space-y-1">
+                <span className="block text-xs font-bold text-slate-700">صورة خلفية الهيرو</span>
+                <label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-100 transition">
+                  <span>📷 رفع صورة خلفية جديدة</span>
+                  <input type="file" accept="image/*" hidden onChange={uploadHeroImage} />
+                </label>
+              </div>
+            </div>
+          </div>
+
+          {/* Section 2: Sports & Programs Management */}
+          <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200/70 space-y-6">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">🏅 2. إدارة البرامج والرياضات المتاحة</h3>
+                <p className="text-xs text-slate-500">إضافة وتعديل وحذف الرياضات التي تظهر في معرض الرياضات بالواجهة</p>
+              </div>
+              <input
+                value={sectionTitle}
+                onChange={(e) => setSectionTitle(e.target.value)}
+                onBlur={saveSportsTitle}
+                className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-900 outline-none"
+                placeholder="عنوان قسم الرياضات"
+              />
+            </div>
+
+            {/* Form: Add New Sport */}
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-4">
+              <h4 className="font-bold text-slate-800 text-xs">إضافة رياضة / برنامج جديد +</h4>
+              <div className="grid gap-3 md:grid-cols-3">
+                <input
+                  value={sportName}
+                  onChange={(e) => setSportName(e.target.value)}
+                  placeholder="اسم الرياضة (مثال: كرة القدم)"
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-sky-500"
+                />
+                <input
+                  value={sportTag}
+                  onChange={(e) => setSportTag(e.target.value)}
+                  placeholder="التصنيف (مثال: كرة القدم، السباحة)"
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-sky-500"
+                />
+                <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100">
+                  <span>🖼️ {sportImagePreview ? 'تم اختيار صورة' : 'رفع صورة الرياضة'}</span>
+                  <input type="file" accept="image/*" hidden onChange={uploadSportImage} />
+                </label>
+              </div>
+              <textarea
+                value={sportDesc}
+                onChange={(e) => setSportDesc(e.target.value)}
+                placeholder="وصف تفصيلي للبرنامج التدريبي..."
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-sky-500"
+                rows={2}
+              />
               <button
                 type="button"
-                className="w-full rounded-2xl bg-sky-600 px-4 py-2.5 text-xs font-bold text-white transition hover:bg-sky-700"
-                onClick={saveLandingHeroSettings}
+                onClick={addLandingSport}
+                className="rounded-xl bg-sky-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-sky-700 transition"
               >
-                حفظ إعدادات الهيرو
+                + إدراج الرياضة في المعرض
               </button>
             </div>
 
-            <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200/70 space-y-4">
-              <h2 className="text-lg font-bold text-slate-900 border-b border-slate-100 pb-3">سيرة رئيس مجلس الإدارة</h2>
-              <label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs font-bold text-slate-700">
-                <span>👤 رفع صورة رئيس مجلس الإدارة</span>
-                <input type="file" accept="image/*" hidden onChange={uploadCeoPhoto} />
-              </label>
-              {ceoPhotoPreview && <img src={ceoPhotoPreview} alt="CEO" className="h-28 rounded-2xl object-cover border border-slate-200" />}
+            {/* List: Existing Sports */}
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {landingSports.map((sport, index) => (
+                <div key={index} className="relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-2">
+                  {sport.image && (
+                    <img src={sport.image} alt={sport.name} className="h-28 w-full rounded-xl object-cover border border-slate-200" />
+                  )}
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-900 text-sm">{sport.name}</span>
+                    <span className="rounded-full bg-sky-100 text-sky-800 px-2.5 py-0.5 text-[10px] font-bold">{sport.tag}</span>
+                  </div>
+                  <p className="text-xs text-slate-500 line-clamp-2">{sport.desc}</p>
+                  <button
+                    type="button"
+                    onClick={() => deleteLandingSport(index)}
+                    className="w-full rounded-xl bg-rose-50 border border-rose-200 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-100 transition"
+                  >
+                    🗑️ حذف الرياضة
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Section 3: Branches & Facilities Management */}
+          <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200/70 space-y-6">
+            <div className="border-b border-slate-100 pb-3">
+              <h3 className="text-lg font-bold text-slate-900">🏢 3. إدارة الفروع والمرافق المتاحة</h3>
+              <p className="text-xs text-slate-500">إضافة فروع الأكاديمية ومواقعها ومرافقها الرياضية</p>
+            </div>
+
+            {/* Form: Add New Branch */}
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-4">
+              <h4 className="font-bold text-slate-800 text-xs">إضافة فرع جديد +</h4>
+              <div className="grid gap-3 md:grid-cols-2">
+                <input
+                  value={branchName}
+                  onChange={(e) => setBranchName(e.target.value)}
+                  placeholder="اسم الفرع (مثال: فرع دبي هيلز)"
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-sky-500"
+                />
+                <input
+                  value={branchMapsUrl}
+                  onChange={(e) => setBranchMapsUrl(e.target.value)}
+                  placeholder="رابط خرائط جوجل (Google Maps URL)"
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-sky-500"
+                />
+              </div>
+              <textarea
+                value={branchDescription}
+                onChange={(e) => setBranchDescription(e.target.value)}
+                placeholder="العنوان ومواعيد العمل والمميزات (مفصولة بفاصلة)..."
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-sky-500"
+                rows={2}
+              />
+              <div className="flex items-center gap-3">
+                <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100">
+                  <span>🖼️ {branchImagePreview ? 'تم اختيار صورة' : 'رفع صورة الفرع'}</span>
+                  <input type="file" accept="image/*" hidden onChange={uploadLBranchImage} />
+                </label>
+                <button
+                  type="button"
+                  onClick={addLandingBranch}
+                  className="rounded-xl bg-sky-600 px-5 py-2 text-xs font-bold text-white hover:bg-sky-700 transition"
+                >
+                  + إدراج الفرع
+                </button>
+              </div>
+            </div>
+
+            {/* List: Existing Branches */}
+            <div className="grid gap-3 md:grid-cols-2">
+              {landingBranches.map((branch, index) => (
+                <div key={index} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-2">
+                  {branch.image && (
+                    <img src={branch.image} alt={branch.name} className="h-32 w-full rounded-xl object-cover border border-slate-200" />
+                  )}
+                  <h4 className="font-bold text-slate-900 text-sm">{branch.name}</h4>
+                  <p className="text-xs text-slate-500">{branch.description}</p>
+                  <button
+                    type="button"
+                    onClick={() => deleteLandingBranch(index)}
+                    className="w-full rounded-xl bg-rose-50 border border-rose-200 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-100 transition"
+                  >
+                    🗑️ حذف الفرع
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Section 4: Pricing Plans & Subscriptions */}
+          <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200/70 space-y-6">
+            <div className="border-b border-slate-100 pb-3">
+              <h3 className="text-lg font-bold text-slate-900">💳 4. إدارة باقات الاشتراكات والأسعار</h3>
+              <p className="text-xs text-slate-500">إضافة وتحديث باقات الاشتراك الشهري والسنوي والأسعار</p>
+            </div>
+
+            {/* Form: Add New Plan */}
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-4">
+              <h4 className="font-bold text-slate-800 text-xs">إضافة باقة اشتراك جديدة +</h4>
+              <div className="grid gap-3 md:grid-cols-3">
+                <input
+                  value={planForm.name}
+                  onChange={(e) => setPlanForm((prev) => ({ ...prev, name: e.target.value }))}
+                  placeholder="اسم الباقة (مثال: الباقة الاحترافية Pro)"
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-sky-500"
+                />
+                <input
+                  value={planForm.price}
+                  onChange={(e) => setPlanForm((prev) => ({ ...prev, price: e.target.value }))}
+                  placeholder="السعر الشهري (مثال: 310)"
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-sky-500"
+                />
+                <input
+                  value={planForm.originalPrice}
+                  onChange={(e) => setPlanForm((prev) => ({ ...prev, originalPrice: e.target.value }))}
+                  placeholder="السعر السنوي / قبل الخصم (اختياري)"
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-sky-500"
+                />
+              </div>
+              <input
+                value={planForm.features}
+                onChange={(e) => setPlanForm((prev) => ({ ...prev, features: e.target.value }))}
+                placeholder="المميزات مفصولة بفاصلة (مثال: 4 حصص أسبوعياً, طقم رياضي, تقييم مهارات)"
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-sky-500"
+              />
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={planForm.isFeatured}
+                    onChange={(e) => setPlanForm((prev) => ({ ...prev, isFeatured: e.target.checked }))}
+                    className="rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                  />
+                  <span>تميز هذه الباقة بعبارة (الأكثر طلباً / MOST POPULAR)</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={addLandingPlan}
+                  className="rounded-xl bg-sky-600 px-5 py-2 text-xs font-bold text-white hover:bg-sky-700 transition"
+                >
+                  + إدراج الباقة
+                </button>
+              </div>
+            </div>
+
+            {/* List: Existing Plans */}
+            <div className="grid gap-4 md:grid-cols-3">
+              {plans.map((plan, index) => (
+                <div
+                  key={index}
+                  className={`rounded-2xl border p-4 space-y-3 relative ${
+                    plan.isFeatured ? 'border-amber-400 bg-amber-50/30 ring-2 ring-amber-400/20' : 'border-slate-200 bg-slate-50'
+                  }`}
+                >
+                  {plan.isFeatured && (
+                    <span className="absolute -top-3 left-3 bg-amber-500 text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full">
+                      الأكثر طلباً 🔥
+                    </span>
+                  )}
+                  <h4 className="font-bold text-slate-900 text-sm">{plan.name}</h4>
+                  <div className="text-xl font-extrabold text-sky-700">
+                    {plan.price} <span className="text-xs font-normal text-slate-500">ج.م / شهرياً</span>
+                  </div>
+                  <ul className="space-y-1 text-xs text-slate-600">
+                    {plan.features.map((feat, fIdx) => (
+                      <li key={fIdx} className="flex items-center gap-1.5">
+                        <span className="text-emerald-500 font-bold">✓</span>
+                        <span>{feat}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <button
+                    type="button"
+                    onClick={() => deleteLandingPlan(index)}
+                    className="w-full rounded-xl bg-rose-50 border border-rose-200 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-100 transition"
+                  >
+                    🗑️ حذف الباقة
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Section 5: Testimonials & Reviews */}
+          <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200/70 space-y-6">
+            <div className="border-b border-slate-100 pb-3">
+              <h3 className="text-lg font-bold text-slate-900">💬 5. آراء العملاء وأولياء الأمور</h3>
+              <p className="text-xs text-slate-500">إدارة التقييمات وآراء أولياء الأمور المعروضة بالموقع</p>
+            </div>
+
+            {/* Form: Add Testimonial */}
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-4">
+              <h4 className="font-bold text-slate-800 text-xs">إضافة رأي جديد +</h4>
+              <div className="grid gap-3 md:grid-cols-2">
+                <input
+                  value={testimonialForm.name}
+                  onChange={(e) => setTestimonialForm((prev) => ({ ...prev, name: e.target.value }))}
+                  placeholder="اسم ولي الأمر / العميل (مثال: سارة م.)"
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-sky-500"
+                />
+                <input
+                  value={testimonialForm.role}
+                  onChange={(e) => setTestimonialForm((prev) => ({ ...prev, role: e.target.value }))}
+                  placeholder="الوصف (مثال: والدة مايا - 9 سنوات)"
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-sky-500"
+                />
+              </div>
+              <textarea
+                value={testimonialForm.text}
+                onChange={(e) => setTestimonialForm((prev) => ({ ...prev, text: e.target.value }))}
+                placeholder="نص التقييم والرأي..."
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-sky-500"
+                rows={2}
+              />
               <button
                 type="button"
-                className="w-full rounded-2xl bg-sky-600 px-4 py-2.5 text-xs font-bold text-white transition hover:bg-sky-700"
-                onClick={saveCeoBiographySettings}
+                onClick={addTestimonial}
+                className="rounded-xl bg-sky-600 px-5 py-2 text-xs font-bold text-white hover:bg-sky-700 transition"
               >
-                حفظ صورة السيرة الذاتية
+                + إدراج التقييم
               </button>
             </div>
+
+            {/* List: Existing Testimonials */}
+            <div className="grid gap-3 md:grid-cols-2">
+              {testimonials.map((tItem, index) => (
+                <div key={index} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-900 text-sm">{tItem.name}</span>
+                    <span className="text-xs text-amber-500 font-bold">★★★★★</span>
+                  </div>
+                  <p className="text-xs text-slate-600 italic">"{tItem.text}"</p>
+                  <p className="text-[11px] text-slate-400">{tItem.role}</p>
+                  <button
+                    type="button"
+                    onClick={() => deleteTestimonial(index)}
+                    className="w-full rounded-xl bg-rose-50 border border-rose-200 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-100 transition"
+                  >
+                    🗑️ حذف الرأي
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Section 6: FAQ Management */}
+          <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200/70 space-y-6">
+            <div className="border-b border-slate-100 pb-3">
+              <h3 className="text-lg font-bold text-slate-900">❓ 6. الأسئلة الشائعة (FAQ)</h3>
+              <p className="text-xs text-slate-500">إضافة وتعديل الأسئلة الشائعة التي تجيب على استفسارات الأولياء</p>
+            </div>
+
+            {/* Form: Add FAQ */}
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+              <h4 className="font-bold text-slate-800 text-xs">إضافة سؤال جديد +</h4>
+              <input
+                value={faqForm.q}
+                onChange={(e) => setFaqForm((prev) => ({ ...prev, q: e.target.value }))}
+                placeholder="السؤال (مثال: ما هي الفئات العمرية المتاحة؟)"
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-sky-500"
+              />
+              <textarea
+                value={faqForm.a}
+                onChange={(e) => setFaqForm((prev) => ({ ...prev, a: e.target.value }))}
+                placeholder="الإجابة..."
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-sky-500"
+                rows={2}
+              />
+              <button
+                type="button"
+                onClick={addLandingFaq}
+                className="rounded-xl bg-sky-600 px-5 py-2 text-xs font-bold text-white hover:bg-sky-700 transition"
+              >
+                + إدراج السؤال
+              </button>
+            </div>
+
+            {/* List: Existing FAQs */}
+            <div className="space-y-3">
+              {landingFaq.map((faq, index) => (
+                <div key={index} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 flex items-start justify-between gap-4">
+                  <div className="space-y-1">
+                    <h5 className="font-bold text-slate-900 text-xs sm:text-sm">Q: {faq.q}</h5>
+                    <p className="text-xs text-slate-600">A: {faq.a}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => deleteLandingFaq(index)}
+                    className="rounded-xl bg-rose-50 border border-rose-200 px-3 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-100 transition shrink-0"
+                  >
+                    حذف
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Section 7: Footer & Contact Info */}
+          <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200/70 space-y-4">
+            <h3 className="text-lg font-bold text-slate-900 border-b border-slate-100 pb-3">📜 7. بيانات الفوتر وحقوق الملكية</h3>
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="block text-xs font-bold text-slate-700">
+                الشعار والرسالة (Tagline)
+                <input
+                  value={landingFooter.tagline}
+                  onChange={(e) => setLandingFooter((prev) => ({ ...prev, tagline: e.target.value }))}
+                  className="mt-1 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs text-slate-900 outline-none"
+                />
+              </label>
+              <label className="block text-xs font-bold text-slate-700">
+                حقوق الملكية (Copyright Notice)
+                <input
+                  value={landingFooter.rights}
+                  onChange={(e) => setLandingFooter((prev) => ({ ...prev, rights: e.target.value }))}
+                  className="mt-1 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs text-slate-900 outline-none"
+                />
+              </label>
+            </div>
+          </div>
+
+          {/* Bottom Fixed-style Master Save CTA */}
+          <div className="rounded-3xl bg-slate-900 p-6 text-white flex flex-col md:flex-row items-center justify-between gap-4 shadow-xl">
+            <div>
+              <h4 className="font-bold text-base">هل انتهيت من التعديلات؟</h4>
+              <p className="text-xs text-slate-400">انقر على الزر لحفظ كافة تعديلات الفروع والرياضات والأسعار مباشرة إلى الباك إند.</p>
+            </div>
+            <button
+              type="button"
+              onClick={saveAllLandingSettings}
+              className="rounded-2xl bg-emerald-500 px-8 py-3.5 text-sm font-extrabold text-white shadow-lg shadow-emerald-500/30 hover:bg-emerald-400 transition"
+            >
+              💾 حفظ ونشر جميع التعديلات الآن 🚀
+            </button>
           </div>
         </div>
       ) : null}
+
 
       {/* ───────────────────────────────────────────────────────────── */}
       {/* ── TAB 5: Backup & Restore (النسخ الاحتياطي) ── */}

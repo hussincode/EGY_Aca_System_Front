@@ -187,9 +187,9 @@ export default function Leads() {
 
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
 
-  // Load from API on mount
+  // Load from API on mount & auto-sync continuously
   useEffect(() => {
-    const loadData = async () => {
+    const fetchAllLeads = async () => {
       const api = window.api;
 
       if (api?.getBranches && api?.getToken?.()) {
@@ -199,39 +199,91 @@ export default function Leads() {
             setBranches(res.data);
             window.localStorage.setItem(BRANCHES_KEY, JSON.stringify(res.data));
           }
+        } catch {}
+      }
+
+      // Always read fresh localStorage (not cached)
+      const freshLocalLeads = (() => {
+        const raw = window.localStorage.getItem(LEADS_KEY);
+        if (!raw) return [] as Lead[];
+        try {
+          return (JSON.parse(raw) as unknown[]).map((item) => normalizeLead(item as Partial<Lead>));
         } catch {
-          // fallback
+          return [] as Lead[];
+        }
+      })();
+
+      const token = typeof window !== 'undefined' ? window.localStorage.getItem('api_token') : null;
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      let serverMapped: Lead[] = [];
+
+      // Try window.api first (uses correct API_BASE_URL + token auto-inject)
+      if (window.api?.getLeads && window.api?.getToken?.()) {
+        try {
+          const response = (await window.api.getLeads()) as { data?: unknown[] };
+          const serverLeads = Array.isArray(response?.data) ? response.data : [];
+          serverMapped = serverLeads
+            .map((item: unknown) => normalizeLeadFromDb(item as Record<string, unknown>))
+            .filter((item: Lead | null): item is Lead => Boolean(item && item.id));
+        } catch {}
+      }
+
+      // Fallback: raw fetch to local backend
+      if (serverMapped.length === 0) {
+        const endpoints = [
+          'http://localhost:5000/api/leads',
+          'https://egyacaback.vercel.app/api/leads',
+        ];
+        for (const url of endpoints) {
+          try {
+            const res = await fetch(url, { headers });
+            if (res.ok) {
+              const json = await res.json();
+              const serverLeads = Array.isArray(json?.data) ? json.data : [];
+              serverMapped = serverLeads
+                .map((item: unknown) => normalizeLeadFromDb(item as Record<string, unknown>))
+                .filter((item: Lead | null): item is Lead => Boolean(item && item.id));
+              if (serverMapped.length > 0) break;
+            }
+          } catch {}
         }
       }
 
-      if (!api?.getLeads || !api?.getToken?.()) {
-        return;
-      }
+      // Merge server + localStorage, always prefer server version for same id
+      const merged: Lead[] = [
+        ...serverMapped,
+        ...freshLocalLeads.filter((local) => !serverMapped.some((server) => server.id === local.id)),
+      ];
 
-      try {
-        const response = (await api.getLeads()) as { data?: unknown[] };
-        const serverLeads = Array.isArray(response?.data) ? response.data : [];
-        const mapped = serverLeads
-          .map((item) => normalizeLeadFromDb(item as Record<string, unknown>))
-          .filter((item): item is Lead => Boolean(item && item.id));
+      // Always update state (even from localStorage alone)
+      setLeads(merged.length > 0 ? merged : freshLocalLeads);
 
-        if (mapped.length > 0) {
-          const localLeads = readStoredData<unknown[]>(LEADS_KEY, []).map((item) =>
-            normalizeLead(item as Partial<Lead>)
-          );
-          const merged = [
-            ...mapped,
-            ...localLeads.filter((local) => !mapped.some((server) => server.id === local.id)),
-          ];
-          setLeads(merged);
-          window.localStorage.setItem(LEADS_KEY, JSON.stringify(merged));
-        }
-      } catch {
-        // fallback
+      if (merged.length > 0) {
+        window.localStorage.setItem(LEADS_KEY, JSON.stringify(merged));
       }
     };
 
-    loadData();
+    void fetchAllLeads();
+
+    const interval = setInterval(() => {
+      void fetchAllLeads();
+    }, 2000);
+
+    const handleSync = () => void fetchAllLeads();
+    window.addEventListener('storage', handleSync);
+    window.addEventListener('app:sync', handleSync);
+    window.addEventListener('focus', handleSync);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('storage', handleSync);
+      window.removeEventListener('app:sync', handleSync);
+      window.removeEventListener('focus', handleSync);
+    };
   }, []);
 
   useEffect(() => {

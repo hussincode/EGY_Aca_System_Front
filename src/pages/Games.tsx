@@ -80,6 +80,41 @@ function dedupeGames(items: Game[]): Game[] {
   return unique;
 }
 
+function syncGamesToLanding(gameList: Game[]) {
+  if (typeof window === 'undefined') return;
+  try {
+    const landingSports = gameList.map((g, idx) => ({
+      id: g.id || `sport_${idx}`,
+      name: g.name,
+      tag: g.name,
+      desc: g.description || 'برنامج تدريبي متكامل لتطوير المهارات الرياضية واللياقة البدنية.',
+      image: '/assets/football_card.jpg',
+    }));
+
+    window.localStorage.setItem('landing_sports', JSON.stringify(landingSports));
+
+    try {
+      const bc = new BroadcastChannel('landing_settings_sync');
+      bc.postMessage({ landing_sports: landingSports });
+      bc.close();
+    } catch {}
+
+    window.dispatchEvent(new Event('storage'));
+    window.dispatchEvent(new CustomEvent('app:sync', { detail: { key: 'landing_sports', value: landingSports } }));
+
+    const urls = ['http://localhost:5000/api/landing-settings', 'https://egyacaback.vercel.app/api/landing-settings'];
+    urls.forEach((url) => {
+      fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ landing_sports: landingSports }),
+      }).catch(() => {});
+    });
+  } catch (err) {
+    console.warn('Sync games to landing failed:', err);
+  }
+}
+
 export default function Games() {
   const { canEdit } = useAuth();
   const canEditGames = canEdit('games');
@@ -96,6 +131,7 @@ export default function Games() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem('games', JSON.stringify(games));
+    syncGamesToLanding(games);
   }, [games]);
 
   useEffect(() => {

@@ -99,11 +99,11 @@ function readStoredData<T>(key: string, fallback: T): T {
 }
 
 function formatPlayerSerial(sequence: number) {
-  return `PLY-${String(sequence).padStart(6, '0')}`;
+  return `PLY-${String(sequence).padStart(2, '0')}`;
 }
 
 function formatPlayerBarcodeValue(sequence: number) {
-  return `EGY${String(sequence).padStart(6, '0')}`;
+  return `EGY${String(sequence).padStart(2, '0')}`;
 }
 
 function toSqlDate(value?: string) {
@@ -167,6 +167,10 @@ export default function Players() {
   const [formState, setFormState] = useState<PlayerFormState>(initialFormState);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+
+  // ── Player Profile Modal (view details + copy player code) ──
+  const [viewingPlayer, setViewingPlayer] = useState<Player | null>(null);
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
   useEffect(() => {
     window.localStorage.setItem('players', JSON.stringify(players));
@@ -605,7 +609,7 @@ export default function Players() {
       const cleanPhone = String(player.phone).replace(/\D/g, '');
       const phone = cleanPhone.startsWith('01') ? `2${cleanPhone}` : cleanPhone;
       window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, '_blank');
-      setTimeout(() => {}, 300);
+      setTimeout(() => { }, 300);
     });
   };
 
@@ -638,6 +642,29 @@ export default function Players() {
     link.click();
     URL.revokeObjectURL(url);
   };
+
+  // ── Player Profile helpers ──
+  const handleCopyPlayerCode = async (code: string) => {
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopiedCode(code);
+      setToastMessage('تم نسخ كود اللاعب بنجاح ✅');
+      setTimeout(() => setCopiedCode((prev) => (prev === code ? null : prev)), 2000);
+    } catch {
+      setToastMessage('تعذر نسخ الكود، حاول يدوياً');
+    }
+  };
+
+  const getPlayerAttendanceStats = (player: Player) => {
+    const records = attendance.filter((record) => record.player_id === player.id || record.playerId === player.id);
+    const present = records.filter((record) => record.status === 'present' || record.status === 'late').length;
+    const absent = records.filter((record) => record.status === 'absent').length;
+    const total = records.filter((record) => ['present', 'absent', 'late'].includes(record.status)).length;
+    const rate = total > 0 ? Math.round((present / total) * 100) : 0;
+    return { present, absent, total, rate };
+  };
+
   const { canEdit } = useAuth();
   const canEditPlayers = canEdit('players');
 
@@ -835,7 +862,16 @@ export default function Players() {
                   const rate = totalMarked > 0 ? Math.round((presentCount / totalMarked) * 100) : 0;
                   return (
                     <tr key={player.id} className="hover:bg-slate-50/70 transition">
-                      <td className="px-4 py-3 font-bold text-slate-900">{player.name}</td>
+                      <td className="px-4 py-3 font-bold">
+                        <button
+                          type="button"
+                          onClick={() => setViewingPlayer(player)}
+                          className="text-sky-700 hover:text-sky-900 hover:underline transition text-right"
+                          title="عرض ملف اللاعب"
+                        >
+                          {player.name}
+                        </button>
+                      </td>
                       <td className="px-4 py-3 text-slate-600">{player.age ?? '-'}</td>
                       <td className="px-4 py-3 text-slate-600">{player.phone || '-'}</td>
                       <td className="px-4 py-3 text-slate-600">{player.game || '-'}</td>
@@ -944,11 +980,10 @@ export default function Players() {
                       setFormState((prev) => ({ ...prev, phone: digits }));
                     }}
                     placeholder="01012345678"
-                    className={`w-full rounded-xl border py-2.5 px-3 text-right text-xs text-slate-900 outline-none focus:bg-white ${
-                      formState.phone && formState.phone.length !== 11
-                        ? 'border-red-400 bg-red-50'
-                        : 'border-slate-200 bg-slate-50 focus:border-sky-500'
-                    }`}
+                    className={`w-full rounded-xl border py-2.5 px-3 text-right text-xs text-slate-900 outline-none focus:bg-white ${formState.phone && formState.phone.length !== 11
+                      ? 'border-red-400 bg-red-50'
+                      : 'border-slate-200 bg-slate-50 focus:border-sky-500'
+                      }`}
                   />
                   {formState.phone && formState.phone.length !== 11 && (
                     <p className="text-[11px] text-red-500 text-right">
@@ -1137,6 +1172,157 @@ export default function Players() {
           </div>
         </div>
       ) : null}
+
+      {/* ── Player Profile Modal (view details + copy player code) ── */}
+      {viewingPlayer ? (() => {
+        const stats = getPlayerAttendanceStats(viewingPlayer);
+        const code = viewingPlayer.playerSerial || '—';
+        const barcode = viewingPlayer.playerBarcodeValue || '—';
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+            <div className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-2xl border border-slate-100">
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/50 px-5 py-4">
+                <h2 className="text-base font-bold text-slate-900">ملف اللاعب</h2>
+                <button type="button" onClick={() => setViewingPlayer(null)} className="text-slate-400 hover:text-slate-700 transition">×</button>
+              </div>
+
+              <div className="overflow-y-auto p-5 space-y-4">
+                {/* Player Card */}
+                <div className="flex items-center gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-sky-200 bg-sky-50">
+                    {viewingPlayer.photo ? (
+                      <img src={viewingPlayer.photo} alt={viewingPlayer.name} className="h-full w-full object-cover" />
+                    ) : (
+                      <span className="text-2xl font-extrabold text-sky-600">{viewingPlayer.name.charAt(0)}</span>
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="truncate text-lg font-extrabold text-slate-900">{viewingPlayer.name}</h3>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      {viewingPlayer.game && <span className="text-sky-600 font-semibold">{viewingPlayer.game}</span>}
+                      {viewingPlayer.branch && <span className="text-slate-400"> · {viewingPlayer.branch}</span>}
+                    </p>
+                  </div>
+                  <span
+                    className={`shrink-0 rounded-full border px-3 py-1 text-xs font-bold ${viewingPlayer.status === 'paid'
+                        ? 'border-emerald-200 bg-emerald-100 text-emerald-800'
+                        : 'border-amber-200 bg-amber-100 text-amber-800'
+                      }`}
+                  >
+                    {viewingPlayer.status === 'paid' ? 'مدفوع' : 'مستحق'}
+                  </span>
+                </div>
+
+                {/* Player Code Section */}
+                <div className="space-y-3 rounded-2xl border border-sky-200 bg-sky-50/50 p-4">
+                  <h4 className="flex items-center gap-1.5 text-xs font-bold text-slate-800">🎫 كود اللاعب</h4>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                      <div className="min-w-0">
+                        <div className="text-[10px] text-slate-400">الرقم التسلسلي</div>
+                        <div className="truncate font-mono text-sm font-bold text-slate-900" dir="ltr">{code}</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyPlayerCode(code)}
+                        className="shrink-0 rounded-lg bg-sky-600 px-3 py-1.5 text-[11px] font-bold text-white transition hover:bg-sky-700"
+                      >
+                        {copiedCode === code ? '✓ تم' : 'نسخ'}
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                      <div className="min-w-0">
+                        <div className="text-[10px] text-slate-400">قيمة الباركود</div>
+                        <div className="truncate font-mono text-sm font-bold text-slate-900" dir="ltr">{barcode}</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyPlayerCode(barcode)}
+                        className="shrink-0 rounded-lg bg-sky-600 px-3 py-1.5 text-[11px] font-bold text-white transition hover:bg-sky-700"
+                      >
+                        {copiedCode === barcode ? '✓ تم' : 'نسخ'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Stats row */}
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="rounded-2xl border border-emerald-100 bg-emerald-50/50 p-3 text-center">
+                    <div className="text-lg font-extrabold text-emerald-700">{stats.rate}%</div>
+                    <div className="mt-0.5 text-[10px] font-medium text-emerald-600">نسبة الحضور</div>
+                  </div>
+                  <div className="rounded-2xl border border-sky-100 bg-sky-50/50 p-3 text-center">
+                    <div className="text-lg font-extrabold text-sky-700">{stats.present}</div>
+                    <div className="mt-0.5 text-[10px] font-medium text-sky-600">حضور</div>
+                  </div>
+                  <div className="rounded-2xl border border-rose-100 bg-rose-50/50 p-3 text-center">
+                    <div className="text-lg font-extrabold text-rose-700">{stats.absent}</div>
+                    <div className="mt-0.5 text-[10px] font-medium text-rose-600">غياب</div>
+                  </div>
+                </div>
+
+                {/* Basic info */}
+                <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <h4 className="mb-2 text-xs font-bold text-slate-800">بيانات اللاعب</h4>
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-slate-500">العمر</span>
+                      <span className="font-semibold text-slate-900">{viewingPlayer.age ?? '-'}</span>
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-slate-500">رقم الهاتف</span>
+                      <span className="font-semibold text-slate-900" dir="ltr">{viewingPlayer.phone || '-'}</span>
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-slate-500">نوع العضوية</span>
+                      <span className="font-semibold text-slate-900">
+                        {viewingPlayer.memberType === 'annual' ? 'سنوية' : viewingPlayer.memberType === 'federation' ? 'اتحاد' : 'بدون'}
+                      </span>
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-slate-500">تاريخ انتهاء العضوية</span>
+                      <span className="font-semibold text-slate-900">{viewingPlayer.memberExpiry || '-'}</span>
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-slate-500">السفير</span>
+                      <span className="font-semibold text-slate-900">{viewingPlayer.ambId || '-'}</span>
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-slate-500">تاريخ الانضمام</span>
+                      <span className="font-semibold text-slate-900">{viewingPlayer.joinDate || '-'}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/50 px-5 py-3">
+                <button
+                  type="button"
+                  onClick={() => setViewingPlayer(null)}
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                >
+                  إغلاق
+                </button>
+                {canEditPlayers && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const player = viewingPlayer;
+                      setViewingPlayer(null);
+                      handleOpenPlayerModal(player);
+                    }}
+                    className="rounded-xl bg-sky-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-sky-700"
+                  >
+                    تعديل بيانات اللاعب
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })() : null}
     </div>
   );
 }

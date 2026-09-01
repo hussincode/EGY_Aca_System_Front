@@ -98,14 +98,14 @@ function broadcastLandingChange(key: string, value: unknown) {
     const bc = new BroadcastChannel('landing_settings_sync');
     bc.postMessage({ [key]: value });
     bc.close();
-  } catch {}
+  } catch { }
   try {
     fetch(`${API_BASE_URL}/api/landing-settings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ [key]: value }),
-    }).catch(() => {});
-  } catch {}
+    }).catch(() => { });
+  } catch { }
 }
 
 function writeJson<T>(key: string, value: T) {
@@ -484,7 +484,7 @@ export default function Settings() {
             setSystemUsers(res.data);
             writeJson('users', res.data);
           }
-        } catch {}
+        } catch { }
       }
     };
     void fetchUsersList();
@@ -892,25 +892,20 @@ export default function Settings() {
 
     broadcastLandingChange('landing_full', fullPayload);
 
-    const targetUrls = new Set([
-      'http://localhost:5000/api/landing-settings',
-      `${API_BASE_URL}/api/landing-settings`,
-    ]);
-
     let savedOk = false;
-    for (const url of targetUrls) {
-      try {
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(fullPayload),
-        });
-        if (res.ok) savedOk = true;
-      } catch {}
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/landing-settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fullPayload),
+      });
+      if (res.ok) savedOk = true;
+    } catch (err) {
+      console.warn('Failed to save landing settings to backend:', err);
     }
 
     if (savedOk) {
-      showToast('تم حفظ ونشر جميع تعديلات اللاندنج بيدج في الباك إند بنجاح 🚀', 'success');
+      showToast('تم حفظ ونشر جميع تعديلات اللاندنج بيدج  بنجاح 🚀', 'success');
     } else {
       showToast('تم حفظ التعديلات وبثها محلياً بنجاح ⚡', 'success');
     }
@@ -918,8 +913,7 @@ export default function Settings() {
 
 
   const tabButtonClass = (tab: TabKey) =>
-    `rounded-2xl border px-5 py-3 text-xs md:text-sm font-bold transition-all ${
-      activeTab === tab ? 'border-sky-600 bg-sky-600 text-white shadow-md shadow-sky-600/20' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+    `rounded-2xl border px-5 py-3 text-xs md:text-sm font-bold transition-all ${activeTab === tab ? 'border-sky-600 bg-sky-600 text-white shadow-md shadow-sky-600/20' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
     }`;
 
   const tabContentClass = 'space-y-6';
@@ -1502,9 +1496,8 @@ export default function Settings() {
               {plans.map((plan, index) => (
                 <div
                   key={index}
-                  className={`rounded-2xl border p-4 space-y-3 relative ${
-                    plan.isFeatured ? 'border-amber-400 bg-amber-50/30 ring-2 ring-amber-400/20' : 'border-slate-200 bg-slate-50'
-                  }`}
+                  className={`rounded-2xl border p-4 space-y-3 relative ${plan.isFeatured ? 'border-amber-400 bg-amber-50/30 ring-2 ring-amber-400/20' : 'border-slate-200 bg-slate-50'
+                    }`}
                 >
                   {plan.isFeatured && (
                     <span className="absolute -top-3 left-3 bg-amber-500 text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full">
@@ -1750,9 +1743,8 @@ export default function Settings() {
       {/* Toast Alert Popup */}
       {toast ? (
         <div
-          className={`fixed bottom-6 left-6 right-6 z-50 mx-auto max-w-md rounded-2xl px-5 py-3.5 text-xs font-bold text-white shadow-2xl transition-all ${
-            toast.type === 'success' ? 'bg-emerald-600' : toast.type === 'warning' ? 'bg-amber-600' : 'bg-rose-600'
-          }`}
+          className={`fixed bottom-6 left-6 right-6 z-50 mx-auto max-w-md rounded-2xl px-5 py-3.5 text-xs font-bold text-white shadow-2xl transition-all ${toast.type === 'success' ? 'bg-emerald-600' : toast.type === 'warning' ? 'bg-amber-600' : 'bg-rose-600'
+            }`}
         >
           {toast.message}
         </div>

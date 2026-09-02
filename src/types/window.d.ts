@@ -63,7 +63,7 @@ interface WindowApi {
   deleteStaff: (id: string) => Promise<unknown>;
   // Leads
   getLeads: () => Promise<ApiListResponse<unknown[]>>;
-  createLead: (lead: { name: string; phone: string; parent?: string; interest?: string; status?: string; branch_id?: string; notes?: string }) => Promise<unknown>;
+  createLead: (lead: Record<string, any>) => Promise<unknown>;
   updateLead: (id: string, lead: Record<string, any>) => Promise<unknown>;
   deleteLead: (id: string) => Promise<unknown>;
   // Attendance
@@ -73,7 +73,7 @@ interface WindowApi {
   deleteAttendance: (id: string) => Promise<unknown>;
   // Ambassadors
   getAmbassadors: () => Promise<ApiListResponse<unknown[]>>;
-  createAmbassador: (ambassador: { name: string; phone?: string; branch_id?: string; notes?: string }) => Promise<unknown>;
+  createAmbassador: (ambassador: Record<string, any>) => Promise<unknown>;
   updateAmbassador: (id: string, ambassador: Record<string, any>) => Promise<unknown>;
   deleteAmbassador: (id: string) => Promise<unknown>;
   // Users

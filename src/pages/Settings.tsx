@@ -523,29 +523,51 @@ export default function Settings() {
     return Array.from(usersMap.values());
   }, [systemUsers, loggedUser]);
 
+  // List of user/auth keys that should NEVER be cleared during a reset or backup restore
+  const USER_PRESERVED_KEYS = useMemo(() => new Set([
+    'users',
+    'system_users',
+    'loggedInUser',
+    'user',
+    'api_token',
+    'token',
+    'auth_token',
+    'authToken',
+  ]), []);
+
   // Backup Import & Export handlers
   const exportData = () => {
-    const backupObject: Record<string, unknown> = {};
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key) {
-        try {
-          backupObject[key] = JSON.parse(localStorage.getItem(key) || '');
-        } catch {
-          backupObject[key] = localStorage.getItem(key);
+    try {
+      const backupObject: Record<string, unknown> = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key) {
+          const raw = localStorage.getItem(key);
+          if (raw !== null) {
+            try {
+              backupObject[key] = JSON.parse(raw);
+            } catch {
+              backupObject[key] = raw;
+            }
+          }
         }
       }
-    }
 
-    const data = JSON.stringify(backupObject, null, 2);
-    const blob = new Blob([data], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `egy_academy_backup_${new Date().toISOString().slice(0, 10)}.json`;
-    anchor.click();
-    URL.revokeObjectURL(url);
-    showToast('تم تصدير النسخة الاحتياطية بنجاح 📦', 'success');
+      const data = JSON.stringify(backupObject, null, 2);
+      const blob = new Blob([data], { type: 'application/json;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `egy_academy_backup_${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(url);
+      showToast('تم تصدير النسخة الاحتياطية بنجاح 📦', 'success');
+    } catch (err) {
+      console.error('Failed to export backup:', err);
+      showToast('حدث خطأ أثناء تصدير النسخة الاحتياطية', 'error');
+    }
   };
 
   const importData = (event: ChangeEvent<HTMLInputElement>) => {
@@ -556,26 +578,135 @@ export default function Settings() {
     reader.onload = (e) => {
       try {
         const content = e.target?.result as string;
-        const parsed = JSON.parse(content) as Record<string, unknown>;
-
-        if (typeof parsed === 'object' && parsed !== null) {
-          if (window.confirm('⚠️ تحذير: استرجاع النسخة الاحتياطية سيستبدل البيانات الحالية. هل ترغب في الاستمرار؟')) {
-            Object.entries(parsed).forEach(([k, v]) => {
-              if (typeof v === 'string') {
-                window.localStorage.setItem(k, v);
-              } else {
-                window.localStorage.setItem(k, JSON.stringify(v));
-              }
-            });
-            showToast('تم استرجاع النسخة الاحتياطية بنجاح! جاري تحديث الصفحة...', 'success');
-            setTimeout(() => window.location.reload(), 1200);
-          }
+        if (!content || !content.trim()) {
+          showToast('ملف النسخة الاحتياطية فارغ!', 'error');
+          return;
         }
-      } catch {
-        showToast('ملف النسخة الاحتياطية غير صالح', 'error');
+
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(content);
+        } catch {
+          showToast('ملف النسخة الاحتياطية غير صالح (JSON غير سليم)', 'error');
+          return;
+        }
+
+        if (typeof parsed !== 'object' || parsed === null) {
+          showToast('ملف النسخة الاحتياطية لا يحتوي على بنية بيانات صالحة', 'error');
+          return;
+        }
+
+        let targetData = parsed as Record<string, unknown>;
+
+        // Unwrap if nested under data, backup, or localStorage
+        if (targetData.data && typeof targetData.data === 'object' && !Array.isArray(targetData.data)) {
+          targetData = targetData.data as Record<string, unknown>;
+        } else if (targetData.backup && typeof targetData.backup === 'object' && !Array.isArray(targetData.backup)) {
+          targetData = targetData.backup as Record<string, unknown>;
+        } else if (targetData.localStorage && typeof targetData.localStorage === 'object' && !Array.isArray(targetData.localStorage)) {
+          targetData = targetData.localStorage as Record<string, unknown>;
+        }
+
+        const entries = Object.entries(targetData);
+        if (entries.length === 0) {
+          showToast('ملف النسخة الاحتياطية لا يحتوي على أي سجلات!', 'error');
+          return;
+        }
+
+        if (window.confirm('⚠️ تحذير: استرجاع النسخة الاحتياطية سيستبدل بيانات النظام الحالية بمحتوى النسخة. هل ترغب في المتابعة؟')) {
+          // Backup current user session info in case backup does not include them
+          const currentLoggedIn = localStorage.getItem('loggedInUser');
+          const currentApiToken = localStorage.getItem('api_token');
+          const currentUsers = localStorage.getItem('users');
+          const currentSystemUsers = localStorage.getItem('system_users');
+
+          // Remove non-user keys to ensure old leftover data doesn't conflict
+          const keysToRemove: string[] = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && !USER_PRESERVED_KEYS.has(k)) {
+              keysToRemove.push(k);
+            }
+          }
+          keysToRemove.forEach((k) => localStorage.removeItem(k));
+
+          // Set all keys from backup file
+          entries.forEach(([k, v]) => {
+            if (v === undefined || v === null) return;
+            if (typeof v === 'string') {
+              window.localStorage.setItem(k, v);
+            } else {
+              window.localStorage.setItem(k, JSON.stringify(v));
+            }
+          });
+
+          // Restore user credentials if missing from backup
+          if (!targetData.loggedInUser && currentLoggedIn) {
+            window.localStorage.setItem('loggedInUser', currentLoggedIn);
+          }
+          if (!targetData.api_token && currentApiToken) {
+            window.localStorage.setItem('api_token', currentApiToken);
+          }
+          if (!targetData.users && currentUsers) {
+            window.localStorage.setItem('users', currentUsers);
+          }
+          if (!targetData.system_users && currentSystemUsers) {
+            window.localStorage.setItem('system_users', currentSystemUsers);
+          }
+
+          // Broadcast landing sync if landing settings exist
+          if (targetData.landing_settings_full || targetData.landing_hero_settings) {
+            broadcastLandingChange('landing_full', targetData.landing_settings_full || targetData);
+          }
+
+          window.dispatchEvent(new Event('storage'));
+          showToast('تم استرجاع النسخة الاحتياطية وتطبيق البيانات بنجاح! 📥 جاري تحديث الصفحة...', 'success');
+          setTimeout(() => {
+            window.location.reload();
+          }, 1200);
+        }
+      } catch (err) {
+        console.error('Failed to import backup:', err);
+        showToast('حدث خطأ أثناء استرجاع ملف النسخة الاحتياطية', 'error');
+      } finally {
+        if (event.target) {
+          event.target.value = '';
+        }
+      }
+    };
+    reader.onerror = () => {
+      showToast('فشل قراءة الملف المرفوع', 'error');
+      if (event.target) {
+        event.target.value = '';
       }
     };
     reader.readAsText(file);
+  };
+
+  const handleResetDataExceptUsers = () => {
+    if (
+      window.confirm(
+        '⚠️ تحذير: هل أنت متأكد من مسح جميع بيانات النظام (اللاعبين، الاشتراكات، الحسابات، المبيعات، الفروع، الإعدادات) مع الاحتفاظ بحسابات المستخدمين وجلسة تسجيل الدخول؟'
+      )
+    ) {
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && !USER_PRESERVED_KEYS.has(key)) {
+          keysToRemove.push(key);
+        }
+      }
+
+      keysToRemove.forEach((key) => {
+        localStorage.removeItem(key);
+      });
+
+      window.dispatchEvent(new Event('storage'));
+      showToast('تم مسح جميع بيانات النظام بنجاح مع الاحتفاظ بحسابات المستخدمين 🧹 جاري إعادة التحميل...', 'success');
+      setTimeout(() => {
+        window.location.reload();
+      }, 1000);
+    }
   };
 
   // Landing Page Helper Handlers
@@ -1716,24 +1847,22 @@ export default function Settings() {
                 <p className="text-xs text-sky-700">رفع ملف نسخة احتياطية واستعادة البيانات بالكامل إلى النظام.</p>
                 <label className="inline-flex cursor-pointer items-center gap-2 rounded-2xl bg-sky-600 px-5 py-3 text-xs font-bold text-white shadow-md hover:bg-sky-700 transition">
                   <span>اختيار ملف النسخة وتطبيقها</span>
-                  <input type="file" accept=".json" hidden onChange={importData} />
+                  <input type="file" accept=".json,application/json" hidden onChange={importData} />
                 </label>
               </div>
             </div>
 
             {/* Emergency Reset */}
-            <div className="pt-4 border-t border-slate-100">
+            <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <p className="text-xs text-slate-500">
+                سيتم مسح سجلات اللاعبين والاشتراكات والمبيعات والفروع مع الحفاظ الكامل على حسابات المستخدمين وجلسة الدخول.
+              </p>
               <button
                 type="button"
-                className="rounded-2xl bg-rose-50 border border-rose-200 px-4 py-2.5 text-xs font-bold text-rose-700 hover:bg-rose-100 transition"
-                onClick={() => {
-                  if (window.confirm('⚠️ تحذير شديد: هل أنت متأكد من مسح جميع البيانات والتخزين المحلي للنظام بالكامل؟')) {
-                    window.localStorage.clear();
-                    window.location.reload();
-                  }
-                }}
+                className="rounded-2xl bg-rose-50 border border-rose-200 px-4 py-2.5 text-xs font-bold text-rose-700 hover:bg-rose-100 transition whitespace-nowrap"
+                onClick={handleResetDataExceptUsers}
               >
-                ⚠️ مسح التخزين المحلي المحلي وإعادة الضبط
+                ⚠️ مسح التخزين المحلي وإعادة الضبط
               </button>
             </div>
           </div>

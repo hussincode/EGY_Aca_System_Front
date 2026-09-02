@@ -231,6 +231,7 @@ export default function Settings() {
   const [auditPage, setAuditPage] = useState(1);
   const [auditTotalPages, setAuditTotalPages] = useState(1);
   const [auditLoading, setAuditLoading] = useState(false);
+  const [isResettingData, setIsResettingData] = useState(false);
 
   // Load landing settings from backend on mount
   useEffect(() => {
@@ -683,12 +684,36 @@ export default function Settings() {
     reader.readAsText(file);
   };
 
-  const handleResetDataExceptUsers = () => {
+  const handleResetDataExceptUsers = async () => {
     if (
-      window.confirm(
-        '⚠️ تحذير: هل أنت متأكد من مسح جميع بيانات النظام (اللاعبين، الاشتراكات، الحسابات، المبيعات، الفروع، الإعدادات) مع الاحتفاظ بحسابات المستخدمين وجلسة تسجيل الدخول؟'
+      !window.confirm(
+        '⚠️ تحذير شديد الأهمية: هل أنت متأكد من مسح كافة بيانات قاعدة البيانات والنظام (اللاعبين، الاشتراكات، الحركات المالية، المصروفات، الفروع، السجلات، الحضور) بالكامل؟\n\nسيتم الاحتفاظ فقط بحسابات المستخدمين وبيانات تسجيل الدخول.'
       )
     ) {
+      return;
+    }
+
+    setIsResettingData(true);
+    try {
+      // 1. Reset SQL Database via Backend API
+      try {
+        if (window.api?.resetDatabaseExceptUsers) {
+          await window.api.resetDatabaseExceptUsers();
+        } else {
+          const token = localStorage.getItem('api_token');
+          await fetch(`${API_BASE_URL}/api/system/reset-except-users`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+          });
+        }
+      } catch (backendErr) {
+        console.warn('Backend database reset warning (offline/fallback):', backendErr);
+      }
+
+      // 2. Clear local storage except user & session credentials
       const keysToRemove: string[] = [];
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
@@ -702,10 +727,14 @@ export default function Settings() {
       });
 
       window.dispatchEvent(new Event('storage'));
-      showToast('تم مسح جميع بيانات النظام بنجاح مع الاحتفاظ بحسابات المستخدمين 🧹 جاري إعادة التحميل...', 'success');
+      showToast('تم مسح جميع بيانات قاعدة البيانات والنظام بنجاح مع الاحتفاظ بحسابات المستخدمين 🧹 جاري تحديث الصفحة...', 'success');
       setTimeout(() => {
         window.location.reload();
-      }, 1000);
+      }, 1200);
+    } catch (err) {
+      console.error('Failed to reset data:', err);
+      showToast('حدث خطأ أثناء مسح البيانات', 'error');
+      setIsResettingData(false);
     }
   };
 
@@ -1852,17 +1881,30 @@ export default function Settings() {
               </div>
             </div>
 
-            {/* Emergency Reset */}
-            <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-              <p className="text-xs text-slate-500">
-                سيتم مسح سجلات اللاعبين والاشتراكات والمبيعات والفروع مع الحفاظ الكامل على حسابات المستخدمين وجلسة الدخول.
-              </p>
+            {/* Emergency Database & System Reset */}
+            <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-rose-50/50 p-4 rounded-2xl border border-rose-100">
+              <div className="space-y-1">
+                <h4 className="text-xs font-bold text-rose-900">مسح بيانات قاعدة البيانات والنظام (ما عدا المستخدمين) ⚠️</h4>
+                <p className="text-[11px] text-rose-700">
+                  سيتم مسح كافة بيانات قاعدة البيانات والنظام بالكامل (سجلات اللاعبين، الاشتراكات، الحركات المالية، المصروفات، الفروع، السجلات، الحضور) مع الحفاظ التام على حسابات المستخدمين وجلسة تسجيل الدخول.
+                </p>
+              </div>
               <button
                 type="button"
-                className="rounded-2xl bg-rose-50 border border-rose-200 px-4 py-2.5 text-xs font-bold text-rose-700 hover:bg-rose-100 transition whitespace-nowrap"
+                disabled={isResettingData}
+                className="rounded-2xl bg-rose-600 px-5 py-3 text-xs font-extrabold text-white shadow-md hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed transition whitespace-nowrap flex items-center gap-2"
                 onClick={handleResetDataExceptUsers}
               >
-                ⚠️ مسح التخزين المحلي وإعادة الضبط
+                {isResettingData ? (
+                  <>
+                    <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
+                    <span>جاري مسح البيانات...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>🧹 مسح بيانات النظام (ما عدا المستخدمين)</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

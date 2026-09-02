@@ -85,6 +85,8 @@ interface WindowApi {
   sendInvoiceNotification: (phone: string, imageData: string, caption: string) => Promise<unknown>;
   // Dashboard
   getDashboardStats: () => Promise<ApiResponse<Record<string, unknown>>>;
+  // System & Database
+  resetDatabaseExceptUsers?: () => Promise<unknown>;
 }
 
 declare global {

@@ -396,6 +396,13 @@ const api = {
     window.open(url, '_blank');
     return Promise.resolve({ ok: true });
   },
+
+  // ========== SYSTEM & DATABASE ==========
+  resetDatabaseExceptUsers() {
+    return request<ApiResponse>('/system/reset-except-users', {
+      method: 'POST',
+    });
+  },
 };
 
 if (typeof window !== 'undefined') {

@@ -293,7 +293,7 @@ export default function Ambassadors() {
 
   async function deleteAmbassador(index: number) {
     if (!window.confirm('متأكد من حذف هذا السفير؟')) return;
-    
+
     try {
       const api = window.api;
       const ambassador = ambassadors[index];
@@ -303,7 +303,7 @@ export default function Ambassadors() {
     } catch (error) {
       console.error('Failed to delete ambassador via API', error);
     }
-    
+
     setAmbassadors((prev) => prev.filter((_, itemIndex) => itemIndex !== index));
   }
 
@@ -323,13 +323,13 @@ export default function Ambassadors() {
         prev.length
           ? prev
           : [
-              {
-                AmbName: 'أحمد السفير',
-                AmbPhone: '01001234567',
-                RefCode: 'REF1234',
-                Ambstatus: 'Active',
-              },
-            ]
+            {
+              AmbName: 'أحمد السفير',
+              AmbPhone: '01001234567',
+              RefCode: 'REF1234',
+              Ambstatus: 'Active',
+            },
+          ]
       );
     }
 
@@ -389,7 +389,7 @@ export default function Ambassadors() {
                     onClick={() => openModal(null)}
                     className="rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary-hover"
                   >
-                    + إضافة سفير
+                    +. إضافة سفير
                   </button>
                 )}
                 <button
@@ -506,11 +506,10 @@ export default function Ambassadors() {
                       </td>
                       <td className="px-4 py-3">
                         <span
-                          className={`rounded-full px-3 py-1 text-sm font-semibold ${
-                            amb.Ambstatus === 'Active'
+                          className={`rounded-full px-3 py-1 text-sm font-semibold ${amb.Ambstatus === 'Active'
                               ? 'bg-success-light text-success'
                               : 'bg-warning-light text-warning'
-                          }`}
+                            }`}
                         >
                           {amb.Ambstatus === 'Active' ? 'نشط' : 'غير نشط'}
                         </span>

@@ -79,15 +79,17 @@ function createLeadId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function normalizeLead(lead: Partial<Lead> & { id?: string }): Lead {
+function normalizeLead(lead: Partial<Lead> & { id?: string; parentName?: string; parent_name?: string; branch_name?: string; childAge?: string | number }): Lead {
+  const p = lead.parent || lead.parentName || lead.parent_name || '';
+  const b = lead.branch || lead.branch_name || '';
   return {
     id: lead.id || createLeadId(),
     name: lead.name || '-',
-    parent: lead.parent || '',
+    parent: p,
     phone: lead.phone || '',
     sport: lead.sport || '',
-    age: lead.age || '',
-    branch: lead.branch || '',
+    age: lead.age || lead.childAge || '',
+    branch: b,
     source: lead.source || '',
     score: lead.score || 'hot',
     followDate: lead.followDate || '',
@@ -99,19 +101,29 @@ function normalizeLead(lead: Partial<Lead> & { id?: string }): Lead {
   };
 }
 
-function normalizeLeadFromDb(row: Record<string, unknown> | null | undefined): Lead | null {
+function normalizeLeadFromDb(row: Record<string, unknown> | null | undefined, branchesList?: Array<{ id: string; name: string }>): Lead | null {
   if (!row) return null;
+  const branchId = String(row.branch_id || '');
+  let branchName = String(row.branch_name || row.branch || '');
+  if (!branchName && branchId && branchesList?.length) {
+    const found = branchesList.find((b) => b.id === branchId);
+    if (found) branchName = found.name;
+  }
+
+  const parentName = String(row.parent || row.parentName || row.parent_name || '');
+
   return normalizeLead({
     id: String(row.id || ''),
     name: String(row.name || ''),
-    parent: String(row.parent || ''),
+    parent: parentName,
     phone: String(row.phone || ''),
     sport: String(row.interest || row.sport || ''),
-    branch: String(row.branch_name || row.branch || ''),
-    branch_id: String(row.branch_id || ''),
+    branch: branchName,
+    branch_id: branchId,
     source: String(row.source || ''),
     score: (row.score as LeadScore) || 'hot',
-    followDate: String(row.followDate || ''),
+    age: String(row.age || row.childAge || ''),
+    followDate: String(row.followDate || row.follow_date || ''),
     notes: String(row.notes || ''),
     status: (row.status as LeadStatus) || 'new',
     created_at: String(row.created_at || ''),
@@ -192,14 +204,16 @@ export default function Leads() {
     const fetchAllLeads = async () => {
       const api = window.api;
 
+      let currentBranches = branches;
       if (api?.getBranches && api?.getToken?.()) {
         try {
           const res = (await api.getBranches()) as { data?: Array<{ id: string; name: string }> };
           if (Array.isArray(res?.data) && res.data.length) {
+            currentBranches = res.data;
             setBranches(res.data);
             window.localStorage.setItem(BRANCHES_KEY, JSON.stringify(res.data));
           }
-        } catch {}
+        } catch { }
       }
 
       // Always read fresh localStorage (not cached)
@@ -227,9 +241,9 @@ export default function Leads() {
           const response = (await window.api.getLeads()) as { data?: unknown[] };
           const serverLeads = Array.isArray(response?.data) ? response.data : [];
           serverMapped = serverLeads
-            .map((item: unknown) => normalizeLeadFromDb(item as Record<string, unknown>))
+            .map((item: unknown) => normalizeLeadFromDb(item as Record<string, unknown>, currentBranches))
             .filter((item: Lead | null): item is Lead => Boolean(item && item.id));
-        } catch {}
+        } catch { }
       }
 
       // Fallback: raw fetch to local backend
@@ -245,11 +259,11 @@ export default function Leads() {
               const json = await res.json();
               const serverLeads = Array.isArray(json?.data) ? json.data : [];
               serverMapped = serverLeads
-                .map((item: unknown) => normalizeLeadFromDb(item as Record<string, unknown>))
+                .map((item: unknown) => normalizeLeadFromDb(item as Record<string, unknown>, currentBranches))
                 .filter((item: Lead | null): item is Lead => Boolean(item && item.id));
               if (serverMapped.length > 0) break;
             }
-          } catch {}
+          } catch { }
         }
       }
 
@@ -299,21 +313,23 @@ export default function Leads() {
   const filteredLeads = useMemo(() => {
     return leads.filter((lead) => {
       const term = search.trim().toLowerCase();
+      const branchName = lead.branch || branches.find((b) => b.id === lead.branch_id)?.name || '';
       const matchesSearch =
         !term ||
         lead.name.toLowerCase().includes(term) ||
         (lead.parent || '').toLowerCase().includes(term) ||
         (lead.phone || '').includes(term) ||
         (lead.sport || '').toLowerCase().includes(term) ||
+        branchName.toLowerCase().includes(term) ||
         (lead.notes || '').toLowerCase().includes(term);
 
       const matchesStatus = filterStatus === 'all' || lead.status === filterStatus;
       const matchesScore = filterScore === 'all' || lead.score === filterScore;
-      const matchesBranch = filterBranch === 'all' || lead.branch === filterBranch;
+      const matchesBranch = filterBranch === 'all' || branchName === filterBranch || lead.branch === filterBranch;
 
       return matchesSearch && matchesStatus && matchesScore && matchesBranch;
     });
-  }, [leads, search, filterStatus, filterScore, filterBranch]);
+  }, [leads, branches, search, filterStatus, filterScore, filterBranch]);
 
   const stats = useMemo(() => {
     const total = leads.length;
@@ -332,13 +348,14 @@ export default function Leads() {
 
   const openEditModal = (lead: Lead) => {
     setEditingLeadId(lead.id);
+    const branchName = lead.branch || branches.find((b) => b.id === lead.branch_id)?.name || '';
     setFormState({
       name: lead.name || '',
       parent: lead.parent || '',
       phone: lead.phone || '',
       sport: lead.sport || '',
       age: String(lead.age || ''),
-      branch: lead.branch || '',
+      branch: branchName,
       source: lead.source || '',
       score: lead.score || 'hot',
       followDate: lead.followDate || '',
@@ -359,23 +376,40 @@ export default function Leads() {
     if (!api?.getToken?.()) return;
 
     try {
+      const selectedBranchObj = branches.find((b) => b.name === leadData.branch || b.id === leadData.branch_id);
+      const branchId = selectedBranchObj?.id || (leadData.branch_id ? leadData.branch_id : undefined);
+
       if (editingLeadId && api.updateLead) {
         await api.updateLead(editingLeadId, {
           name: leadData.name,
+          parent: leadData.parent,
+          parentName: leadData.parent,
           phone: leadData.phone,
           interest: leadData.sport,
           status: leadData.status,
+          branch_id: branchId || null,
+          branch: leadData.branch,
           notes: leadData.notes,
+          score: leadData.score,
+          age: leadData.age,
+          source: leadData.source,
+          followDate: leadData.followDate,
         });
       } else if (api.createLead) {
-        const selectedBranchObj = branches.find((b) => b.name === leadData.branch);
         await api.createLead({
           name: leadData.name,
+          parent: leadData.parent,
+          parentName: leadData.parent,
           phone: leadData.phone || '',
           interest: leadData.sport,
           status: leadData.status,
-          branch_id: selectedBranchObj?.id || undefined,
+          branch_id: branchId || undefined,
+          branch: leadData.branch,
           notes: leadData.notes,
+          score: leadData.score,
+          age: leadData.age,
+          source: leadData.source,
+          followDate: leadData.followDate,
         });
       }
     } catch {
@@ -392,6 +426,7 @@ export default function Leads() {
     }
 
     const currentLead = editingLeadId ? leads.find((l) => l.id === editingLeadId) : null;
+    const selectedBranchObj = branches.find((b) => b.name === formState.branch);
     const leadData: Lead = {
       id: editingLeadId || createLeadId(),
       name: formState.name.trim(),
@@ -400,6 +435,7 @@ export default function Leads() {
       sport: formState.sport.trim(),
       age: formState.age.trim(),
       branch: formState.branch.trim(),
+      branch_id: selectedBranchObj?.id || currentLead?.branch_id || '',
       source: formState.source.trim(),
       score: formState.score,
       followDate: formState.followDate,
@@ -756,7 +792,7 @@ export default function Leads() {
                       <div className="flex items-center justify-between bg-slate-50 p-2 rounded-lg">
                         <span className="text-slate-500">الرياضة والفرع:</span>
                         <span className="font-medium text-slate-800">
-                          {lead.sport || 'رياضة عامة'} {lead.branch ? `• ${lead.branch}` : ''}
+                          {lead.sport || 'رياضة عامة'} {(lead.branch || branches.find((b) => b.id === lead.branch_id)?.name) ? `• ${lead.branch || branches.find((b) => b.id === lead.branch_id)?.name}` : ''}
                         </span>
                       </div>
 
@@ -840,14 +876,15 @@ export default function Leads() {
               <tbody className="divide-y divide-slate-100 bg-white">
                 {filteredLeads.map((lead) => {
                   const isConverted = lead.status === 'convert';
+                  const branchDisplayName = lead.branch || branches.find((b) => b.id === lead.branch_id)?.name || '-';
 
                   return (
                     <tr key={lead.id} className="hover:bg-slate-50/70 transition">
                       <td className="px-4 py-3 font-bold text-slate-900">{lead.name}</td>
-                      <td className="px-4 py-3 text-slate-600">{lead.parent || '-'}</td>
+                      <td className="px-4 py-3 text-slate-700 font-medium">{lead.parent || '-'}</td>
                       <td className="px-4 py-3 font-mono text-slate-700">{lead.phone || '-'}</td>
                       <td className="px-4 py-3 text-slate-700">{lead.sport || '-'}</td>
-                      <td className="px-4 py-3 text-slate-600">{lead.branch || '-'}</td>
+                      <td className="px-4 py-3 text-slate-700 font-medium">{branchDisplayName}</td>
                       <td className="px-4 py-3 font-semibold">
                         {lead.score === 'hot' ? '🔥 ساخن' : lead.score === 'mid' ? '⚡ متوسط' : '❄️ بارد'}
                       </td>

@@ -389,9 +389,10 @@ export default function Ambassadors() {
                     onClick={() => openModal(null)}
                     className="rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary-hover"
                   >
-                    +. إضافة سفير
+                    + إضافة سفير
                   </button>
                 )}
+
                 <button
                   type="button"
                   onClick={addSampleData}
@@ -507,8 +508,8 @@ export default function Ambassadors() {
                       <td className="px-4 py-3">
                         <span
                           className={`rounded-full px-3 py-1 text-sm font-semibold ${amb.Ambstatus === 'Active'
-                              ? 'bg-success-light text-success'
-                              : 'bg-warning-light text-warning'
+                            ? 'bg-success-light text-success'
+                            : 'bg-warning-light text-warning'
                             }`}
                         >
                           {amb.Ambstatus === 'Active' ? 'نشط' : 'غير نشط'}

@@ -63,7 +63,7 @@ interface WindowApi {
   deleteStaff: (id: string) => Promise<unknown>;
   // Leads
   getLeads: () => Promise<ApiListResponse<unknown[]>>;
-  createLead: (lead: { name: string; phone: string; interest?: string; status?: string; branch_id?: string; notes?: string }) => Promise<unknown>;
+  createLead: (lead: { name: string; phone: string; parent?: string; interest?: string; status?: string; branch_id?: string; notes?: string }) => Promise<unknown>;
   updateLead: (id: string, lead: Record<string, any>) => Promise<unknown>;
   deleteLead: (id: string) => Promise<unknown>;
   // Attendance
@@ -95,4 +95,4 @@ declare global {
   }
 }
 
-export {};
+export { };

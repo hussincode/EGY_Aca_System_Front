@@ -296,7 +296,7 @@ const api = {
     return request<ApiResponse<Array<unknown>>>('/leads');
   },
 
-  createLead(lead: { name: string; phone: string; interest?: string; status?: string; branch_id?: string; notes?: string }) {
+  createLead(lead: Record<string, any>) {
     return request<ApiResponse>('/leads', {
       method: 'POST',
       body: JSON.stringify(lead),

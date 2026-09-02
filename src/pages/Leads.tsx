@@ -546,7 +546,54 @@ export default function Leads() {
     showToast('تم الإرسال الجماعي بنجاح');
   };
 
-  const handleConvertToClient = (lead: Lead) => {
+  const handleConvertToClient = async (lead: Lead) => {
+    const api = window.api;
+    const token = api?.getToken?.();
+
+    // 1. Resolve branch ID
+    const selectedBranchObj = branches.find((b) => b.name === lead.branch || b.id === lead.branch_id);
+    const branchId = selectedBranchObj?.id || (lead.branch_id ? lead.branch_id : null);
+
+    // 2. Resolve game ID if sport matches
+    let gameId: string | null = null;
+    const storedGames = readStoredData<Array<{ id: string; name: string }>>('games', []);
+    if (lead.sport) {
+      const matchedGame = storedGames.find(
+        (g) => g.name.toLowerCase().trim() === lead.sport?.toLowerCase().trim()
+      );
+      if (matchedGame) {
+        gameId = matchedGame.id;
+      }
+    }
+
+    // 3. Create player in DB
+    if (api?.createPlayer && token) {
+      try {
+        await api.createPlayer({
+          name: lead.name,
+          phone: lead.phone || null,
+          age: lead.age ? Number(lead.age) : null,
+          branch_id: branchId,
+          game_id: gameId,
+          status: 'due',
+          joined: true,
+          join_date: new Date().toISOString().split('T')[0],
+        });
+      } catch (err) {
+        console.error('Failed to create player via API', err);
+      }
+    }
+
+    // 4. Update lead status in DB
+    if (api?.updateLead && token) {
+      try {
+        await api.updateLead(lead.id, { status: 'convert' });
+      } catch (err) {
+        console.error('Failed to update lead status via API', err);
+      }
+    }
+
+    // 5. Update local state & localStorage
     const players = readStoredData<Player[]>('players', []);
     players.push({
       id: Date.now().toString(),
@@ -555,13 +602,14 @@ export default function Leads() {
       game: lead.sport,
       source: lead.source,
     });
-
     window.localStorage.setItem('players', JSON.stringify(players));
+
     setLeads((prev) => {
       const next = prev.map((item) => (item.id === lead.id ? { ...item, status: 'convert' as LeadStatus } : item));
       window.localStorage.setItem(LEADS_KEY, JSON.stringify(next));
       return next;
     });
+
     showToast('تم تحويل العميل إلى لاعب مسجل ⚽');
     navigate('/players');
   };

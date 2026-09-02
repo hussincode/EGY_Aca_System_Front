@@ -342,7 +342,7 @@ const api = {
     return request<ApiResponse<Array<unknown>>>('/ambassadors');
   },
 
-  createAmbassador(ambassador: { name: string; phone?: string; branch_id?: string; notes?: string }) {
+  createAmbassador(ambassador: Record<string, any>) {
     return request<ApiResponse>('/ambassadors', {
       method: 'POST',
       body: JSON.stringify(ambassador),

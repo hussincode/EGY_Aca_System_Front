@@ -317,7 +317,7 @@ export default function Players() {
   const getUsedSequences = (items: Player[]) => {
     const set = new Set<number>();
     items.forEach((item) => {
-      const match = item.playerSerial?.match(/^PLY-(\d{6})$/);
+      const match = item.playerSerial?.match(/^PLY-(\d+)$/i);
       if (match) set.add(Number(match[1]));
     });
     return set;
@@ -325,17 +325,27 @@ export default function Players() {
 
   const getNextAvailableSequence = (items: Player[]) => {
     const used = getUsedSequences(items);
-    for (let i = 1; i <= 3000; i += 1) {
+    let max = 0;
+    used.forEach((num) => {
+      if (num > max) max = num;
+    });
+    for (let i = 1; i <= max + 1; i += 1) {
       if (!used.has(i)) return i;
     }
-    return 1;
+    return max + 1;
   };
 
   const ensurePlayerIdentity = (player: Player) => {
     const normalized = { ...player };
-    const existingSequence = normalized.playerSerial?.match(/^PLY-(\d{6})$/)?.[1];
-    const sequence = existingSequence ? Number(existingSequence) : getNextAvailableSequence(players);
-    normalized.playerSerial = formatPlayerSerial(sequence);
+    const existingMatch = normalized.playerSerial?.match(/^PLY-(\d+)$/i);
+    let sequence: number;
+    if (existingMatch) {
+      sequence = Number(existingMatch[1]);
+      normalized.playerSerial = normalized.playerSerial || formatPlayerSerial(sequence);
+    } else {
+      sequence = getNextAvailableSequence(players);
+      normalized.playerSerial = formatPlayerSerial(sequence);
+    }
     normalized.playerBarcodeValue = normalized.playerBarcodeValue || formatPlayerBarcodeValue(sequence);
     if (!normalized.memberId && normalized.memberType && normalized.memberType !== 'none') {
       normalized.memberId = normalized.playerSerial;

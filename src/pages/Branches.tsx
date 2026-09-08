@@ -106,7 +106,6 @@ async function fetchJson<T = unknown>(url: string, options: RequestInit = {}) {
   }
 
   const response = await fetch(resolveApiUrl(url), {
-    credentials: 'include',
     ...options,
     headers,
   });
@@ -172,6 +171,7 @@ export default function Branches() {
   const { canEdit } = useAuth();
   const canEditBranches = canEdit('branches');
   const [branches, setBranches] = useState<Branch[]>(() => readLocalBranches());
+  const [initialLoaded, setInitialLoaded] = useState(false);
   const [search, setSearch] = useState('');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('table');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -216,9 +216,11 @@ export default function Branches() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    window.localStorage.setItem(BRANCHES_KEY, JSON.stringify(branches));
-    syncBranchesToLanding(branches);
-  }, [branches]);
+    if (initialLoaded || branches.length > 0) {
+      window.localStorage.setItem(BRANCHES_KEY, JSON.stringify(branches));
+      syncBranchesToLanding(branches);
+    }
+  }, [branches, initialLoaded]);
 
   useEffect(() => {
     if (!toast) return;
@@ -265,18 +267,25 @@ export default function Branches() {
           : [];
         setBranches(items);
         window.localStorage.setItem(BRANCHES_KEY, JSON.stringify(items));
+        setInitialLoaded(true);
         return;
       } catch (error) {
         console.error('Branch API load failed', error);
         if (isApiConnectivityError(error)) {
           switchToLocalMode('تعذر الوصول للباك إند، تم التحويل للوضع المحلي');
+          setInitialLoaded(true);
           return;
         }
       }
     }
 
     setBranches(readLocalBranches());
+    setInitialLoaded(true);
   };
+
+  useEffect(() => {
+    void loadBranches();
+  }, []);
 
   const switchToLocalMode = (message = '') => {
     const local = readLocalBranches();

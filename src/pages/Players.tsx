@@ -173,15 +173,15 @@ export default function Players() {
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
   useEffect(() => {
-    window.localStorage.setItem('players', JSON.stringify(players));
+    if (players.length) window.localStorage.setItem('players', JSON.stringify(players));
   }, [players]);
 
   useEffect(() => {
-    window.localStorage.setItem('branches', JSON.stringify(branches));
+    if (branches.length) window.localStorage.setItem('branches', JSON.stringify(branches));
   }, [branches]);
 
   useEffect(() => {
-    window.localStorage.setItem('games', JSON.stringify(games));
+    if (games.length) window.localStorage.setItem('games', JSON.stringify(games));
   }, [games]);
 
   useEffect(() => {
@@ -260,6 +260,44 @@ export default function Players() {
         }
       } catch (error) {
         console.error('Failed to load attendance from API in Players', error);
+      }
+
+      try {
+        if (api.getBranches) {
+          const bRes = await api.getBranches();
+          const serverBranches = Array.isArray(bRes?.data) ? bRes.data : [];
+          if (serverBranches.length > 0) {
+            const mappedBranches: Branch[] = serverBranches.map((b: any) => ({
+              id: String(b.id || ''),
+              name: String(b.name || ''),
+              location: String(b.location || b.address || ''),
+              manager: String(b.manager || b.contact || ''),
+            }));
+            setBranches(mappedBranches);
+            window.localStorage.setItem('branches', JSON.stringify(mappedBranches));
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load branches in Players', error);
+      }
+
+      try {
+        if (api.getSports) {
+          const gRes = await api.getSports();
+          const serverGames = Array.isArray(gRes?.data) ? gRes.data : [];
+          if (serverGames.length > 0) {
+            const mappedGames: Game[] = serverGames.map((g: any) => ({
+              id: String(g.id || ''),
+              name: String(g.name || ''),
+              icon: String(g.icon || 'trophy'),
+              description: String(g.description || ''),
+            }));
+            setGames(mappedGames);
+            window.localStorage.setItem('games', JSON.stringify(mappedGames));
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load sports in Players', error);
       }
     };
 

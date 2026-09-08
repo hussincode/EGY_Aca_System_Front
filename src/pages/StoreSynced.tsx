@@ -92,7 +92,7 @@ function createStableId(prefix: string) {
 export default function StoreSynced() {
   const [products, setProducts] = useState<Product[]>(() => readStoredData('storeProducts', []));
   const [sales, setSales] = useState<Sale[]>(() => readStoredData('storeSales', []));
-  const [branches] = useState<Branch[]>(() => {
+  const [branches, setBranches] = useState<Branch[]>(() => {
     const storedBranches = readStoredData<Branch[]>('branches', []);
     return storedBranches.length ? storedBranches : [{ name: 'الفرع الرئيسي' }];
   });
@@ -102,6 +102,30 @@ export default function StoreSynced() {
   const [editSaleForm, setEditSaleForm] = useState<EditSaleForm | null>(null);
   const [editingSaleIndex, setEditingSaleIndex] = useState<number | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  useEffect(() => {
+    const loadBranchesFromApi = async () => {
+      const api = window.api;
+      if (!api?.getBranches || !api?.getToken?.()) return;
+      try {
+        const response = await api.getBranches();
+        const serverBranches = Array.isArray(response?.data) ? response.data : [];
+        if (serverBranches.length > 0) {
+          const mappedBranches: Branch[] = serverBranches.map((b: any) => ({
+            id: String(b.id || ''),
+            name: String(b.name || ''),
+            location: String(b.location || b.address || ''),
+            manager: String(b.manager || b.contact || ''),
+          }));
+          setBranches(mappedBranches);
+          window.localStorage.setItem('branches', JSON.stringify(mappedBranches));
+        }
+      } catch {
+        // fallback
+      }
+    };
+    void loadBranchesFromApi();
+  }, []);
 
   useEffect(() => {
     if (!toast) return;

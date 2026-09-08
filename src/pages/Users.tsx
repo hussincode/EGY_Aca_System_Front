@@ -172,7 +172,7 @@ function normalizeUserFromApi(row: Record<string, unknown> | null | undefined): 
 
 export default function UsersPage() {
   const [users, setUsers] = useState<UserRecord[]>(() => readJson('users', []));
-  const [branches] = useState<Branch[]>(() => {
+  const [branches, setBranches] = useState<Branch[]>(() => {
     const storedBranches = readJson<Branch[]>('branches', []);
     return storedBranches.length ? storedBranches : [];
   });
@@ -220,6 +220,25 @@ export default function UsersPage() {
         }
       } catch {
         // fallback to localStorage
+      }
+
+      try {
+        if (api.getBranches) {
+          const bRes = await api.getBranches();
+          const serverBranches = Array.isArray(bRes?.data) ? bRes.data : [];
+          if (serverBranches.length > 0) {
+            const mappedBranches: Branch[] = serverBranches.map((b: any) => ({
+              id: String(b.id || ''),
+              name: String(b.name || ''),
+              location: String(b.location || b.address || ''),
+              manager: String(b.manager || b.contact || ''),
+            }));
+            setBranches(mappedBranches);
+            writeJson('branches', mappedBranches);
+          }
+        }
+      } catch {
+        // fallback
       }
     };
     loadFromApi();

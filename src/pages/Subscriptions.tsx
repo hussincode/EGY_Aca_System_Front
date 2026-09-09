@@ -29,6 +29,8 @@ type FinanceRecordLike = {
 type Player = {
   id: string;
   name: string;
+  game?: string;
+  sport?: string;
   branch?: string;
   branchId?: string;
   playerSerial?: string;
@@ -36,6 +38,7 @@ type Player = {
   phone?: string;
   schedule?: string;
   trainingTime?: string;
+  [key: string]: unknown;
 };
 
 type Game = { id: string; name: string };
@@ -239,7 +242,20 @@ export default function Subscriptions() {
           api.getBranches().catch(() => ({ data: readStorage('branches', []) })),
         ]);
 
-        const loadedPlayers = (playersResponse.data as Player[]) || [];
+        const rawPlayers = (playersResponse.data as any[]) || [];
+        const loadedPlayers: Player[] = rawPlayers.map((p: any) => ({
+          ...p,
+          id: String(p.id || ''),
+          name: String(p.name || ''),
+          game: String(p.game_name || p.game || p.sport || p.sport_name || ''),
+          branch: String(p.branch_name || p.branch || ''),
+          branchId: String(p.branch_id || p.branchId || ''),
+          playerSerial: String(p.player_serial || p.playerSerial || ''),
+          playerBarcodeValue: String(p.playerBarcodeValue || ''),
+          phone: String(p.phone || ''),
+          schedule: String(p.schedule || ''),
+          trainingTime: String(p.training_time || p.trainingTime || ''),
+        }));
         const loadedBranches = (branchesResponse.data as Branch[]) || [];
         const loadedGames = (gamesResponse.data as Game[]) || [];
 
@@ -528,6 +544,22 @@ export default function Subscriptions() {
     setFormState((prev) => ({ ...prev, [field]: value }));
   };
 
+  const handlePlayerChange = (playerId: string) => {
+    const selected = players.find((p) => p.id === playerId);
+    const playerGame = selected?.game || (selected as any)?.game_name || (selected as any)?.sport || '';
+    const playerSchedule = selected?.schedule ? selected.schedule.split(', ').map((s) => s.trim()).filter(Boolean) : [];
+    const [startTime, endTime] = (selected?.trainingTime || '').split(' - ');
+
+    setFormState((prev) => ({
+      ...prev,
+      playerId,
+      game: playerGame || prev.game,
+      schedule: playerSchedule.length > 0 ? playerSchedule : prev.schedule,
+      trainingTimeStart: startTime || prev.trainingTimeStart,
+      trainingTimeEnd: endTime || prev.trainingTimeEnd,
+    }));
+  };
+
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToast({ message, type });
   };
@@ -548,7 +580,11 @@ export default function Subscriptions() {
   const handleSubscriptionSave = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (!formState.playerId || !formState.game || !formState.startDate || !formState.endDate) {
+    const selectedPlayer = players.find((player) => player.id === formState.playerId);
+    const existingSubscription = subscriptions.find((sub) => sub.id === formState.id);
+    const playerGame = selectedPlayer?.game || (selectedPlayer as any)?.game_name || formState.game || existingSubscription?.game || 'عام';
+
+    if (!formState.playerId || !formState.startDate || !formState.endDate) {
       showToast('الرجاء ملء الحقول المطلوبة', 'error');
       return;
     }
@@ -558,8 +594,6 @@ export default function Subscriptions() {
       return;
     }
 
-    const selectedPlayer = players.find((player) => player.id === formState.playerId);
-    const existingSubscription = subscriptions.find((sub) => sub.id === formState.id);
     const paymentDelta = Math.max(0, formState.paidAmount - Number(existingSubscription?.paidAmount || 0));
 
     const rawBranchName = selectedPlayer?.branch || (selectedPlayer as any)?.branch_name || existingSubscription?.branch || '';
@@ -576,7 +610,7 @@ export default function Subscriptions() {
         selectedPlayer?.playerBarcodeValue ||
         existingSubscription?.playerCode ||
         `P${createStableId('player').slice(-5)}`,
-      game: formState.game,
+      game: playerGame,
       branch: branchName,
       branchId: branchId,
       schedule: formState.schedule.join(', '),
@@ -1405,32 +1439,25 @@ export default function Subscriptions() {
                 <label className="font-semibold text-slate-700">اللاعب</label>
                 <select
                   value={formState.playerId}
-                  onChange={(event) => updateForm('playerId', event.target.value)}
+                  onChange={(event) => handlePlayerChange(event.target.value)}
                   required
                   className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-right outline-none"
                 >
                   <option value="">اختر اللاعب</option>
                   {players.map((player) => (
                     <option key={player.id} value={player.id}>
-                      {player.name} {player.playerSerial ? `- ${player.playerSerial}` : ''}
+                      {player.name} {player.playerSerial ? `- ${player.playerSerial}` : ''} {player.game ? `(${player.game})` : ''}
                     </option>
                   ))}
                 </select>
               </div>
 
               <div className="space-y-1">
-                <label className="font-semibold text-slate-700">اللعبة</label>
-                <select
-                  value={formState.game}
-                  onChange={(event) => updateForm('game', event.target.value)}
-                  required
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-right outline-none"
-                >
-                  <option value="">اختر اللعبة</option>
-                  {games.map((game) => (
-                    <option key={game.id} value={game.name}>{game.name}</option>
-                  ))}
-                </select>
+                <label className="font-semibold text-slate-700">اللعبة (تلقائي من اللاعب)</label>
+                <div className="w-full rounded-xl border border-slate-200 bg-slate-100 p-2.5 text-right font-medium text-slate-700 flex items-center justify-between">
+                  <span>{players.find((p) => p.id === formState.playerId)?.game || formState.game || '— غير محددة باللاعب —'}</span>
+                  <span className="rounded-md bg-slate-200/80 px-2 py-0.5 text-[10px] text-slate-600">تلقائي</span>
+                </div>
               </div>
 
               <div className="sm:col-span-2 space-y-1">

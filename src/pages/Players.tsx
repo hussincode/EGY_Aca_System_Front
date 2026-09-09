@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Bell03, SearchSm, Phone01, CalendarCheck01, Gift02, Plus, Trash01 } from '@untitledui/icons';
+import { Bell03, SearchSm, Phone01, CalendarCheck01, Gift02, Plus, Trash01, CreditCard01, Clock, Calendar } from '@untitledui/icons';
 import AppIcon from '@/components/AppIcon';
 import Pagination from '@/components/Pagination';
 import type { Ambassador } from '../types/ambassador';
@@ -38,8 +38,25 @@ type Player = {
 type Branch = { id: string; name: string };
 type Game = { id: string; name: string };
 type TrainingSchedule = { id: string; branch?: string | { id: string }; sport?: string | { id: string }; day?: string; startTime?: string; endTime?: string };
-type AttendanceRecord = { id: string; playerId?: string; player_id?: string; status: 'present' | 'absent' | 'late' | string; date: string };
-type SubscriptionRecord = { id: string; playerId?: string; player?: string; status?: string; sessions?: number; endDate?: string };
+type AttendanceRecord = { id: string; playerId?: string; player_id?: string; subscription_id?: string; status: 'present' | 'absent' | 'late' | string; date: string };
+type SubscriptionRecord = {
+  id: string;
+  playerId?: string;
+  player?: string;
+  playerCode?: string;
+  game?: string;
+  branch?: string;
+  branchId?: string;
+  schedule?: string;
+  trainingTime?: string;
+  sessions?: number;
+  subscriptionValue?: number;
+  paidAmount?: number;
+  startDate?: string;
+  endDate?: string;
+  status?: 'active' | 'expired' | 'cancelled' | string;
+  invoiceNumber?: string;
+};
 type AmbassadorReferral = {
   playerId: string;
   AmbId: string;
@@ -298,6 +315,37 @@ export default function Players() {
         }
       } catch (error) {
         console.error('Failed to load sports in Players', error);
+      }
+
+      try {
+        if (api.getSubscriptions) {
+          const sRes = await api.getSubscriptions();
+          const serverSubs = Array.isArray(sRes?.data) ? sRes.data : [];
+          if (serverSubs.length > 0) {
+            const normalizedSubs: SubscriptionRecord[] = serverSubs.map((item: any) => ({
+              id: String(item.id || ''),
+              playerId: String(item.playerId || item.player_id || ''),
+              player: String(item.player || item.player_name || ''),
+              playerCode: String(item.playerCode || item.player_code || item.playerSerial || ''),
+              game: String(item.game || item.game_name || ''),
+              branch: String(item.branch || item.branch_name || ''),
+              branchId: String(item.branchId || item.branch_id || ''),
+              schedule: String(item.schedule || ''),
+              trainingTime: String(item.trainingTime || item.training_time || ''),
+              sessions: Number(item.sessions || 0),
+              subscriptionValue: Number(item.subscriptionValue ?? item.subscription_value ?? 0),
+              paidAmount: Number(item.paidAmount ?? item.paid_amount ?? 0),
+              startDate: String(item.startDate || item.start_date || ''),
+              endDate: String(item.endDate || item.end_date || ''),
+              status: String(item.status || 'active'),
+              invoiceNumber: String(item.invoiceNumber || item.invoice_number || ''),
+            }));
+            setSubscriptions(normalizedSubs);
+            window.localStorage.setItem('subscriptions', JSON.stringify(normalizedSubs));
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load subscriptions in Players', error);
       }
     };
 
@@ -711,6 +759,86 @@ export default function Players() {
     const total = records.filter((record) => ['present', 'absent', 'late'].includes(record.status)).length;
     const rate = total > 0 ? Math.round((present / total) * 100) : 0;
     return { present, absent, total, rate };
+  };
+
+  const getPlayerSubscriptionInfo = (player: Player) => {
+    const cleanPlayerName = (player.name || '').trim().toLowerCase();
+    const cleanPlayerSerial = (player.playerSerial || '').trim().toLowerCase();
+
+    const matched = subscriptions.filter((s) => {
+      const sPlayerId = String(s.playerId || '');
+      const sPlayer = String(s.player || '').trim().toLowerCase();
+      const sCode = String(s.playerCode || '').trim().toLowerCase();
+
+      return (
+        (sPlayerId && sPlayerId === player.id) ||
+        (cleanPlayerName && sPlayer === cleanPlayerName) ||
+        (cleanPlayerSerial && sCode === cleanPlayerSerial)
+      );
+    });
+
+    if (!matched.length) return null;
+
+    // Pick active subscription (non-cancelled, not expired by date) or fallback to most recent
+    const activeSub =
+      matched.find((s) => {
+        const isCancelled = s.status === 'cancelled';
+        const isExpiredStatus = s.status === 'expired';
+        const isExpiredDate = s.endDate ? new Date(s.endDate) < new Date(new Date().setHours(0, 0, 0, 0)) : false;
+        return !isCancelled && !isExpiredStatus && !isExpiredDate;
+      }) ||
+      matched.find((s) => s.status !== 'cancelled') ||
+      matched[0];
+
+    const totalSessions = Number(activeSub.sessions || 0);
+
+    // Filter attended records for this player within this subscription period
+    const attendedRecords = attendance.filter((record) => {
+      const isThisPlayer = record.player_id === player.id || record.playerId === player.id;
+      const isAttended = record.status === 'present' || record.status === 'late';
+      if (!isThisPlayer || !isAttended) return false;
+      if (activeSub.startDate && record.date < activeSub.startDate.slice(0, 10)) return false;
+      return true;
+    });
+
+    const attendedSessions = attendedRecords.length;
+    const remainingSessions = Math.max(0, totalSessions - attendedSessions);
+
+    // Calculate remaining calendar days until endDate
+    let remainingDays: number | null = null;
+    let isExpiredByDate = false;
+    let isExpiringToday = false;
+
+    if (activeSub.endDate) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const end = new Date(activeSub.endDate);
+      end.setHours(0, 0, 0, 0);
+      if (!isNaN(end.getTime())) {
+        const diffTime = end.getTime() - today.getTime();
+        remainingDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        isExpiredByDate = remainingDays < 0;
+        isExpiringToday = remainingDays === 0;
+      }
+    }
+
+    const isExpiredBySessions = totalSessions > 0 && remainingSessions === 0;
+    const isCancelled = activeSub.status === 'cancelled';
+    const isEffectivelyExpired = isCancelled || isExpiredByDate || isExpiredBySessions || activeSub.status === 'expired';
+
+    return {
+      subscription: activeSub,
+      allSubscriptions: matched,
+      totalSessions,
+      attendedSessions,
+      remainingSessions,
+      remainingDays,
+      isExpiredByDate,
+      isExpiringToday,
+      isExpiredBySessions,
+      isEffectivelyExpired,
+      isCancelled,
+    };
   };
 
   const { canEdit } = useAuth();
@@ -1224,6 +1352,7 @@ export default function Players() {
       {/* ── Player Profile Modal (view details + copy player code) ── */}
       {viewingPlayer ? (() => {
         const stats = getPlayerAttendanceStats(viewingPlayer);
+        const subInfo = getPlayerSubscriptionInfo(viewingPlayer);
         const code = viewingPlayer.playerSerial || '—';
         const barcode = viewingPlayer.playerBarcodeValue || '—';
         return (
@@ -1293,6 +1422,152 @@ export default function Players() {
                       </button>
                     </div>
                   </div>
+                </div>
+
+                {/* ── Subscriptions & Remaining Days/Sessions Section ── */}
+                <div className="space-y-3 rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50/70 via-sky-50/40 to-white p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <AppIcon icon={CreditCard01} className="h-4 w-4 text-indigo-600" />
+                      <h4 className="text-xs font-bold text-slate-800">بيانات الاشتراك والأيام المتبقية</h4>
+                    </div>
+                    {subInfo ? (
+                      <span
+                        className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
+                          subInfo.isCancelled
+                            ? 'bg-rose-100 text-rose-700'
+                            : subInfo.isEffectivelyExpired
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-emerald-100 text-emerald-800'
+                        }`}
+                      >
+                        {subInfo.isCancelled
+                          ? 'ملغي'
+                          : subInfo.isEffectivelyExpired
+                          ? 'منتهي'
+                          : 'ساري / نشط'}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  {subInfo ? (
+                    <div className="space-y-3">
+                      {/* Highlight Grid: Remaining Days & Remaining Sessions */}
+                      <div className="grid grid-cols-2 gap-2.5">
+                        {/* Remaining Days Box */}
+                        <div
+                          className={`flex flex-col items-center justify-center rounded-xl p-3 text-center border shadow-xs transition ${
+                            subInfo.remainingDays !== null && subInfo.remainingDays > 5
+                              ? 'bg-emerald-50/90 border-emerald-200 text-emerald-900'
+                              : subInfo.remainingDays !== null && subInfo.remainingDays > 0
+                              ? 'bg-amber-50/90 border-amber-200 text-amber-900'
+                              : subInfo.remainingDays === 0
+                              ? 'bg-orange-50/90 border-orange-200 text-orange-900'
+                              : 'bg-rose-50/90 border-rose-200 text-rose-900'
+                          }`}
+                        >
+                          <div className="flex items-center gap-1 text-[11px] font-semibold text-slate-500 mb-0.5">
+                            <AppIcon icon={Clock} className="h-3 w-3 text-slate-400" />
+                            <span>الأيام المتبقية</span>
+                          </div>
+                          <div className="text-xl font-black tracking-tight">
+                            {subInfo.remainingDays === null
+                              ? 'غير محدد'
+                              : subInfo.remainingDays > 0
+                              ? `${subInfo.remainingDays} يوم`
+                              : subInfo.remainingDays === 0
+                              ? 'ينتهي اليوم'
+                              : `منتهي (${Math.abs(subInfo.remainingDays)} يوم)`}
+                          </div>
+                          <div className="mt-1 text-[10px] text-slate-500 truncate max-w-full">
+                            {subInfo.subscription.endDate
+                              ? `ينتهي في: ${subInfo.subscription.endDate}`
+                              : 'بدون تاريخ انتهاء'}
+                          </div>
+                        </div>
+
+                        {/* Remaining Sessions Box */}
+                        <div
+                          className={`flex flex-col items-center justify-center rounded-xl p-3 text-center border shadow-xs transition ${
+                            subInfo.remainingSessions > 0
+                              ? 'bg-sky-50/90 border-sky-200 text-sky-900'
+                              : 'bg-rose-50/90 border-rose-200 text-rose-900'
+                          }`}
+                        >
+                          <div className="flex items-center gap-1 text-[11px] font-semibold text-slate-500 mb-0.5">
+                            <AppIcon icon={Calendar} className="h-3 w-3 text-slate-400" />
+                            <span>الحصص المتبقية</span>
+                          </div>
+                          <div className="text-xl font-black tracking-tight">
+                            {subInfo.totalSessions > 0
+                              ? `${subInfo.remainingSessions} من ${subInfo.totalSessions}`
+                              : `${subInfo.attendedSessions} حصة`}
+                          </div>
+                          <div className="mt-1 text-[10px] text-slate-500">
+                            {subInfo.totalSessions > 0
+                              ? `حضر ${subInfo.attendedSessions} حصة (${subInfo.remainingSessions > 0 ? `متبقي ${subInfo.remainingSessions}` : 'اكتملت'})`
+                              : 'لا يوجد عدد حصص'}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Progress Bar for Sessions Consumption */}
+                      {subInfo.totalSessions > 0 && (
+                        <div className="space-y-1.5 rounded-xl bg-white/80 p-2.5 border border-slate-100">
+                          <div className="flex justify-between text-[11px] font-semibold text-slate-600">
+                            <span>استهلاك الحصص: {subInfo.attendedSessions} من إجمالي {subInfo.totalSessions} حصة</span>
+                            <span>{Math.min(100, Math.round((subInfo.attendedSessions / subInfo.totalSessions) * 100))}%</span>
+                          </div>
+                          <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                            <div
+                              className={`h-full transition-all duration-500 ${
+                                subInfo.remainingSessions === 0
+                                  ? 'bg-rose-500'
+                                  : subInfo.remainingSessions <= 2
+                                  ? 'bg-amber-500'
+                                  : 'bg-sky-600'
+                              }`}
+                              style={{
+                                width: `${Math.min(100, Math.round((subInfo.attendedSessions / subInfo.totalSessions) * 100))}%`,
+                              }}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Subscription Details Grid */}
+                      <div className="grid grid-cols-2 gap-2 rounded-xl bg-white/90 p-3 text-xs text-slate-700 border border-slate-100">
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-[10px] text-slate-400">اللعبة:</span>
+                          <span className="font-bold text-slate-900">{subInfo.subscription.game || viewingPlayer.game || '-'}</span>
+                        </div>
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-[10px] text-slate-400">أيام التدريب:</span>
+                          <span className="font-semibold text-slate-800 truncate" title={subInfo.subscription.schedule || ''}>
+                            {subInfo.subscription.schedule || 'غير محدد'}
+                          </span>
+                        </div>
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-[10px] text-slate-400">فترة الاشتراك:</span>
+                          <span className="font-semibold text-slate-800 text-[11px]">
+                            {subInfo.subscription.startDate || '-'} ➔ {subInfo.subscription.endDate || '-'}
+                          </span>
+                        </div>
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-[10px] text-slate-400">المدفوع / الإجمالي:</span>
+                          <span className="font-bold text-emerald-700">
+                            {subInfo.subscription.paidAmount ?? 0} ج
+                            {subInfo.subscription.subscriptionValue ? ` / ${subInfo.subscription.subscriptionValue} ج` : ''}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-dashed border-slate-300 bg-white/70 p-3.5 text-center">
+                      <p className="text-xs font-semibold text-slate-600">لا يوجد اشتراك نشط مسجل لهذا اللاعب حالياً</p>
+                      <p className="mt-0.5 text-[11px] text-slate-400">يمكنك تسجيل اشتراك جديد من صفحة الاشتراكات</p>
+                    </div>
+                  )}
                 </div>
 
                 {/* Stats row */}

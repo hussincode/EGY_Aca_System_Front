@@ -185,6 +185,8 @@ export default function Attendance() {
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState(todayStr);
+  const [dateRangeFrom, setDateRangeFrom] = useState('');
+  const [dateRangeTo, setDateRangeTo] = useState('');
   const [dayFilter, setDayFilter] = useState('all');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('table');
 
@@ -400,13 +402,14 @@ export default function Attendance() {
 
   // Build full list of players scheduled for the selected day / date + existing records
   const displayItems = useMemo(() => {
-    const targetDate = dateFilter === 'all' ? todayStr : dateFilter;
-    const targetDay = dayFilter !== 'all' ? dayFilter : (dateFilter !== 'all' ? getArabicDayOfWeek(targetDate) : '');
-
     const itemsMap = new Map<string, DisplayItem>();
 
+    // ── Case 1: specific single date selected (dateFilter !== 'all') ──
     if (dateFilter !== 'all') {
-      // 1. Add all players who have sessions on targetDay
+      const targetDate = dateFilter;
+      const targetDay = dayFilter !== 'all' ? dayFilter : getArabicDayOfWeek(targetDate);
+
+      // 1a. Players scheduled for that day
       players.forEach((player) => {
         const isScheduled = targetDay ? isPlayerScheduledOnDay(player, targetDay) : true;
         if (isScheduled) {
@@ -429,7 +432,7 @@ export default function Attendance() {
         }
       });
 
-      // 2. Also include any recorded entry on targetDate even if player isn't in main players list or scheduled
+      // 1b. Recorded entries on this date (even if player not in scheduled list)
       records
         .filter((r) => r.date === targetDate)
         .forEach((rec) => {
@@ -451,16 +454,87 @@ export default function Attendance() {
             });
           }
         });
+
+    // ── Case 2: day-of-week filter selected (no specific date, dayFilter !== 'all') ──
+    } else if (dayFilter !== 'all') {
+      // Show ALL players scheduled for that day, with their recorded attendance (any date)
+      players.forEach((player) => {
+        if (!isPlayerScheduledOnDay(player, dayFilter)) return;
+        const sch = getPlayerScheduleStr(player);
+        // Find the most recent record for this player on any date that matches the selected day
+        const playerRecordsOnThisDay = records
+          .filter((r) => r.player_id === player.id && getArabicDayOfWeek(r.date) === dayFilter)
+          .sort((a, b) => b.date.localeCompare(a.date));
+        const latestRecord = playerRecordsOnThisDay[0];
+        itemsMap.set(player.id, {
+          id: latestRecord ? latestRecord.id : `pending_${player.id}_day_${dayFilter}`,
+          player_id: player.id,
+          player_name: player.name,
+          phone: player.phone,
+          game: player.game,
+          branch: player.branch,
+          schedule: sch,
+          date: latestRecord ? latestRecord.date : todayStr,
+          status: latestRecord ? latestRecord.status : 'unrecorded',
+          notes: latestRecord?.notes,
+          isRecorded: Boolean(latestRecord),
+          recordId: latestRecord?.id,
+        });
+      });
+      // Also show any record for that day-of-week not matched to a player
+      records
+        .filter((r) => getArabicDayOfWeek(r.date) === dayFilter)
+        .forEach((rec) => {
+          if (!itemsMap.has(rec.player_id)) {
+            const matchedPlayer = players.find((p) => p.id === rec.player_id);
+            const sch = rec.subscription_schedule || (matchedPlayer ? getPlayerScheduleStr(matchedPlayer) : '');
+            itemsMap.set(rec.id, {
+              id: rec.id,
+              player_id: rec.player_id,
+              player_name: rec.player_name || matchedPlayer?.name || rec.player_id,
+              phone: rec.phone || matchedPlayer?.phone,
+              game: matchedPlayer?.game,
+              branch: matchedPlayer?.branch,
+              schedule: sch,
+              date: rec.date,
+              status: rec.status,
+              notes: rec.notes,
+              isRecorded: true,
+              recordId: rec.id,
+            });
+          }
+        });
+
+    // ── Case 3: date range filter ──
+    } else if (dateRangeFrom && dateRangeTo) {
+      const fromDate = dateRangeFrom;
+      const toDate = dateRangeTo;
+      records
+        .filter((r) => r.date >= fromDate && r.date <= toDate)
+        .forEach((rec) => {
+          const matchedPlayer = players.find((p) => p.id === rec.player_id);
+          const sch = rec.subscription_schedule || (matchedPlayer ? getPlayerScheduleStr(matchedPlayer) : '');
+          itemsMap.set(rec.id, {
+            id: rec.id,
+            player_id: rec.player_id,
+            player_name: rec.player_name || matchedPlayer?.name || rec.player_id,
+            phone: rec.phone || matchedPlayer?.phone,
+            game: matchedPlayer?.game,
+            branch: matchedPlayer?.branch,
+            schedule: sch,
+            date: rec.date,
+            status: rec.status,
+            notes: rec.notes,
+            isRecorded: true,
+            recordId: rec.id,
+          });
+        });
+
+    // ── Case 4: dateFilter === 'all', no day selected ──
     } else {
-      // dateFilter === 'all'
       records.forEach((rec) => {
         const matchedPlayer = players.find((p) => p.id === rec.player_id);
         const sch = rec.subscription_schedule || (matchedPlayer ? getPlayerScheduleStr(matchedPlayer) : '');
-
-        if (dayFilter !== 'all' && !matchesDay(sch, dayFilter)) {
-          return;
-        }
-
         itemsMap.set(rec.id, {
           id: rec.id,
           player_id: rec.player_id,
@@ -477,10 +551,9 @@ export default function Attendance() {
         });
       });
 
-      // Also include today's scheduled players who haven't been recorded yet
-      const todayDay = dayFilter !== 'all' ? dayFilter : todayDayName;
+      // Show today's unrecorded scheduled players
       players.forEach((player) => {
-        const isScheduled = todayDay ? isPlayerScheduledOnDay(player, todayDay) : true;
+        const isScheduled = isPlayerScheduledOnDay(player, todayDayName);
         if (isScheduled) {
           const hasRecordToday = records.some((r) => r.player_id === player.id && r.date === todayStr);
           if (!hasRecordToday) {
@@ -503,7 +576,7 @@ export default function Attendance() {
     }
 
     return Array.from(itemsMap.values());
-  }, [records, players, subscriptions, dateFilter, dayFilter, todayStr, todayDayName]);
+  }, [records, players, subscriptions, dateFilter, dayFilter, dateRangeFrom, dateRangeTo, todayStr, todayDayName]);
 
   // Filtered display items based on search and status filter
   const filteredItems = useMemo(() => {
@@ -528,7 +601,7 @@ export default function Attendance() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchText, statusFilter, dateFilter, dayFilter]);
+  }, [searchText, statusFilter, dateFilter, dayFilter, dateRangeFrom, dateRangeTo]);
 
   const totalPages = Math.ceil(filteredItems.length / rowsPerPage) || 1;
   const paginatedItems = useMemo(() => {
@@ -1022,9 +1095,9 @@ export default function Attendance() {
 
       {/* ── Search & Filter Card ── */}
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm space-y-3">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          {/* Search text */}
-          <div className="relative flex items-center lg:col-span-2">
+        {/* Row 1: Search + Today Button */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="relative flex flex-1 items-center">
             <SearchSm className="absolute right-3 h-4 w-4 text-slate-400" />
             <input
               value={searchText}
@@ -1033,32 +1106,106 @@ export default function Attendance() {
               className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pr-9 pl-3 text-right text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
             />
           </div>
-
-          {/* Date filter */}
-          <select
-            value={dateFilter}
-            onChange={(event) => {
-              setDateFilter(event.target.value);
+          {/* ── حضور اليوم Button ── */}
+          <button
+            type="button"
+            onClick={() => {
+              setDateFilter(todayStr);
+              setDayFilter('all');
+              setDateRangeFrom('');
+              setDateRangeTo('');
+              setStatusFilter('all');
+              setSearchText('');
             }}
-            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-700 outline-none focus:border-sky-500"
+            className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold shadow-sm transition ${
+              dateFilter === todayStr && dayFilter === 'all' && !dateRangeFrom
+                ? 'bg-sky-600 text-white ring-2 ring-sky-300'
+                : 'bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100'
+            }`}
           >
-            <option value={todayStr}>
-              اليوم ({todayDayName} - {todayStr})
-            </option>
-            <option value="all">جميع التواريخ</option>
-            {availableDates
-              .filter((d) => d !== todayStr)
-              .map((d) => (
-                <option key={d} value={d}>
-                  {getArabicDayOfWeek(d)} ({d})
-                </option>
-              ))}
-          </select>
+            <span>📅</span>
+            حضور اليوم
+            <span className="rounded-full bg-white/30 px-1.5 py-0.5 text-[10px] font-bold">
+              {todayDayName}
+            </span>
+          </button>
+        </div>
+
+        {/* Row 2: Filters */}
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {/* Date Range From → To */}
+          <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 lg:col-span-1">
+            <span className="shrink-0 text-[11px] font-semibold text-slate-500">من</span>
+            <input
+              type="date"
+              value={dateRangeFrom}
+              max={dateRangeTo || undefined}
+              onChange={(e) => {
+                setDateRangeFrom(e.target.value);
+                if (e.target.value) {
+                  setDateFilter('all');
+                  setDayFilter('all');
+                }
+              }}
+              className="min-w-0 flex-1 bg-transparent text-xs text-slate-800 outline-none"
+            />
+            <span className="shrink-0 text-[11px] font-semibold text-slate-400">→</span>
+            <input
+              type="date"
+              value={dateRangeTo}
+              min={dateRangeFrom || undefined}
+              onChange={(e) => {
+                setDateRangeTo(e.target.value);
+                if (e.target.value) {
+                  setDateFilter('all');
+                  setDayFilter('all');
+                }
+              }}
+              className="min-w-0 flex-1 bg-transparent text-xs text-slate-800 outline-none"
+            />
+            {(dateRangeFrom || dateRangeTo) && (
+              <button
+                type="button"
+                onClick={() => { setDateRangeFrom(''); setDateRangeTo(''); }}
+                className="shrink-0 text-slate-400 hover:text-rose-500 transition text-sm font-bold"
+                title="مسح نطاق التواريخ"
+              >
+                ×
+              </button>
+            )}
+          </div>
+
+          {/* Single Date Picker */}
+          <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5">
+            <span className="shrink-0 text-[11px] font-semibold text-slate-500">يوم محدد</span>
+            <input
+              type="date"
+              value={dateFilter === 'all' ? '' : dateFilter}
+              onChange={(e) => {
+                if (e.target.value) {
+                  setDateFilter(e.target.value);
+                  setDateRangeFrom('');
+                  setDateRangeTo('');
+                  setDayFilter('all');
+                } else {
+                  setDateFilter('all');
+                }
+              }}
+              className="min-w-0 flex-1 bg-transparent text-xs text-slate-800 outline-none"
+            />
+          </div>
 
           {/* Day of Week filter */}
           <select
             value={dayFilter}
-            onChange={(event) => setDayFilter(event.target.value)}
+            onChange={(event) => {
+              setDayFilter(event.target.value);
+              if (event.target.value !== 'all') {
+                setDateFilter('all');
+                setDateRangeFrom('');
+                setDateRangeTo('');
+              }
+            }}
             className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-700 outline-none focus:border-sky-500"
           >
             <option value="all">كل الأيام</option>
@@ -1082,6 +1229,31 @@ export default function Attendance() {
             <option value="unrecorded">لم يُسجل ({unrecordedCount})</option>
           </select>
         </div>
+
+        {/* Active Filter Tags */}
+        {(dayFilter !== 'all' || dateRangeFrom || (dateFilter !== 'all' && dateFilter !== todayStr)) && (
+          <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2">
+            <span className="text-[11px] font-semibold text-slate-400">الفلاتر النشطة:</span>
+            {dayFilter !== 'all' && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2.5 py-0.5 text-[11px] font-bold text-indigo-700">
+                يوم {dayFilter}
+                <button type="button" onClick={() => setDayFilter('all')} className="text-indigo-400 hover:text-rose-500 font-bold">×</button>
+              </span>
+            )}
+            {dateRangeFrom && dateRangeTo && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700">
+                {dateRangeFrom} → {dateRangeTo}
+                <button type="button" onClick={() => { setDateRangeFrom(''); setDateRangeTo(''); }} className="text-emerald-400 hover:text-rose-500 font-bold">×</button>
+              </span>
+            )}
+            {dateFilter !== 'all' && dateFilter !== todayStr && !dateRangeFrom && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2.5 py-0.5 text-[11px] font-bold text-sky-700">
+                {getArabicDayOfWeek(dateFilter)} ({dateFilter})
+                <button type="button" onClick={() => setDateFilter(todayStr)} className="text-sky-400 hover:text-rose-500 font-bold">×</button>
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ── Content View (Cards or Table) ── */}

@@ -65,6 +65,17 @@ function readJsonStorage<T>(key: string): T | null {
   }
 }
 
+function resolveBranchId(branchNameOrId?: string | null) {
+  if (!branchNameOrId || typeof window === 'undefined') return null;
+  const str = String(branchNameOrId).trim();
+  if (!str) return null;
+  const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (GUID_RE.test(str)) return str;
+  const branches = readJsonStorage<Array<{ id: string; name: string }>>('branches') || [];
+  const found = branches.find((b) => b.name === str || b.name?.trim().toLowerCase() === str.toLowerCase() || b.id === str);
+  return found?.id || null;
+}
+
 function resolveGameId(gameName: string) {
   if (!gameName || typeof window === 'undefined') return null;
   const games = readJsonStorage<Array<{ id: string; name: string }>>('games') || [];
@@ -73,10 +84,16 @@ function resolveGameId(gameName: string) {
 }
 
 function normalizeSubscriptionPayload(subscription: Record<string, any>) {
+  const branchId =
+    resolveBranchId(subscription.branchId) ||
+    resolveBranchId(subscription.branch_id) ||
+    resolveBranchId(subscription.branch) ||
+    null;
+
   return {
     player_id: subscription.playerId || subscription.player_id || null,
     game_id: subscription.gameId || subscription.game_id || resolveGameId(subscription.game) || null,
-    branch_id: subscription.branchId || subscription.branch_id || null,
+    branch_id: branchId,
     schedule: subscription.schedule || '',
     training_time: subscription.trainingTime || subscription.training_time || '',
     sessions: subscription.sessions ?? 0,

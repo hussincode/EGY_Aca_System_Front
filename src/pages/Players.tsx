@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Bell03, SearchSm, Phone01, CalendarCheck01, Gift02, Plus, Trash01, CreditCard01, Clock, Calendar } from '@untitledui/icons';
 import AppIcon from '@/components/AppIcon';
 import Pagination from '@/components/Pagination';
+import PlayerCardModal from '@/components/PlayerCardModal';
 import type { Ambassador } from '../types/ambassador';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -188,6 +189,7 @@ export default function Players() {
   // ── Player Profile Modal (view details + copy player code) ──
   const [viewingPlayer, setViewingPlayer] = useState<Player | null>(null);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  const [cardPlayer, setCardPlayer] = useState<Player | null>(null);
 
   useEffect(() => {
     if (players.length) window.localStorage.setItem('players', JSON.stringify(players));
@@ -1062,12 +1064,21 @@ export default function Players() {
                       <td className="px-4 py-3 text-slate-600">{player.ambId ? 0 : 0}</td>
                       <td className="px-4 py-3 text-slate-600">-</td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center justify-center gap-2">
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setCardPlayer(player)}
+                            className="inline-flex items-center gap-1 rounded-lg border border-cyan-200 bg-cyan-50 px-2.5 py-1 text-xs font-bold text-cyan-700 hover:bg-cyan-100 hover:border-cyan-300 transition"
+                            title="عرض وطباعة الكارنيه"
+                          >
+                            <span>🪪</span>
+                            <span>الكارنيه</span>
+                          </button>
                           {canEditPlayers && (
                             <button
                               type="button"
                               onClick={() => handleOpenPlayerModal(player)}
-                              className="rounded-lg bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-200 transition"
+                              className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-200 transition"
                             >
                               تعديل
                             </button>
@@ -1620,32 +1631,55 @@ export default function Players() {
                 </div>
               </div>
 
-              <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/50 px-5 py-3">
+              <div className="flex items-center justify-between border-t border-slate-100 bg-slate-50/50 px-5 py-3">
                 <button
                   type="button"
-                  onClick={() => setViewingPlayer(null)}
-                  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                  onClick={() => {
+                    const player = viewingPlayer;
+                    setCardPlayer(player);
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-cyan-300 bg-cyan-50 px-4 py-2 text-xs font-bold text-cyan-800 transition hover:bg-cyan-100"
                 >
-                  إغلاق
+                  <span>🪪</span>
+                  <span>عرض وطباعة الكارنيه</span>
                 </button>
-                {canEditPlayers && (
+                <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => {
-                      const player = viewingPlayer;
-                      setViewingPlayer(null);
-                      handleOpenPlayerModal(player);
-                    }}
-                    className="rounded-xl bg-sky-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-sky-700"
+                    onClick={() => setViewingPlayer(null)}
+                    className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                   >
-                    تعديل بيانات اللاعب
+                    إغلاق
                   </button>
-                )}
+                  {canEditPlayers && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const player = viewingPlayer;
+                        setViewingPlayer(null);
+                        handleOpenPlayerModal(player);
+                      }}
+                      className="rounded-xl bg-sky-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-sky-700"
+                    >
+                      تعديل بيانات اللاعب
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </div>
         );
       })() : null}
+
+      {/* ── Player Subscription Card Modal ── */}
+      {cardPlayer && (
+        <PlayerCardModal
+          isOpen={Boolean(cardPlayer)}
+          onClose={() => setCardPlayer(null)}
+          player={cardPlayer}
+          subscription={getPlayerSubscriptionInfo(cardPlayer)?.subscription}
+        />
+      )}
     </div>
   );
 }

@@ -1,12 +1,12 @@
-import { type FormEvent, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Plus, SearchSm, Phone01, Trash01, User01 } from '@untitledui/icons';
 import AppIcon from '@/components/AppIcon';
 import Pagination from '@/components/Pagination';
 import { useAuth } from '@/contexts/AuthContext';
 
-type StaffPayType = 'hour' | 'fixed' | 'percent';
+export type StaffPayType = 'hour' | 'fixed' | 'percent';
 
-type StaffMember = {
+export type StaffMember = {
   id: string;
   staffSerial: string;
   name: string;
@@ -27,7 +27,6 @@ type StaffFormState = {
   hours: number;
   revenue: number;
 };
-
 
 const initialFormState: StaffFormState = {
   name: '',
@@ -58,34 +57,94 @@ function formatStaffSerial(sequence: number) {
   return `STF-${String(sequence).padStart(5, '0')}`;
 }
 
-function getNextStaffSequence(staff: StaffMember[]) {
+function normalizeStaffMember(item: any, fallbackIndex = 1): StaffMember {
+  if (!item || typeof item !== 'object') {
+    return {
+      id: `${Date.now()}-${Math.random()}`,
+      staffSerial: formatStaffSerial(fallbackIndex),
+      name: '',
+      phone: '',
+      role: '',
+      payType: 'hour',
+      rate: 0,
+      hours: 0,
+      revenue: 0,
+    };
+  }
+
+  const id = String(item.id || item.uuid || `${Date.now()}-${Math.random()}`);
+  const serialRaw = item.staffSerial || item.staff_serial || item.serial || formatStaffSerial(fallbackIndex);
+  const staffSerial = String(serialRaw).trim() || formatStaffSerial(fallbackIndex);
+  const name = String(item.name || '').trim();
+  const phone = item.phone != null ? String(item.phone).trim() : '';
+  const role = String(item.role || '').trim();
+
+  let payType: StaffPayType = 'hour';
+  const rawPayType = String(item.payType || item.pay_type || '').toLowerCase();
+  if (rawPayType === 'fixed' || rawPayType === 'percent' || rawPayType === 'hour') {
+    payType = rawPayType as StaffPayType;
+  }
+
+  const rate = Number(item.rate) || 0;
+  const hours = Number(item.hours) || 0;
+  const revenue = Number(item.revenue) || 0;
+
+  return {
+    id,
+    staffSerial,
+    name,
+    phone,
+    role,
+    payType,
+    rate,
+    hours,
+    revenue,
+  };
+}
+
+function getNextStaffSequence(staffList: StaffMember[]) {
   const used = new Set<number>();
-  staff.forEach((member) => {
-    const match = member.staffSerial.match(/^STF-(\d{5})$/);
-    if (match) used.add(Number(match[1]));
-  });
+  if (Array.isArray(staffList)) {
+    staffList.forEach((member) => {
+      const serial = member?.staffSerial || (member as any)?.staff_serial || '';
+      const match = String(serial).match(/(\d+)/);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (!isNaN(num)) used.add(num);
+      }
+    });
+  }
   for (let i = 1; i <= 99999; i += 1) {
     if (!used.has(i)) return i;
   }
   return 1;
 }
 
-const payTypeLabel = (payType: StaffPayType) => {
-  if (payType === 'hour') return 'بالساعة';
+const payTypeLabel = (payType?: StaffPayType) => {
   if (payType === 'fixed') return 'راتب ثابت';
-  return 'نسبة ومئوية';
+  if (payType === 'percent') return 'نسبة ومئوية';
+  return 'بالساعة';
 };
 
-const payTypeBadgeStyle = (payType: StaffPayType) => {
-  if (payType === 'hour') return 'bg-sky-50 text-sky-700 border-sky-200';
+const payTypeBadgeStyle = (payType?: StaffPayType) => {
   if (payType === 'fixed') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
-  return 'bg-amber-50 text-amber-700 border-amber-200';
+  if (payType === 'percent') return 'bg-amber-50 text-amber-700 border-amber-200';
+  return 'bg-sky-50 text-sky-700 border-sky-200';
 };
 
 export default function Staff() {
   const { canEdit } = useAuth();
   const canEditStaff = canEdit('staff');
-  const [staff, setStaff] = useState<StaffMember[]>(() => readStoredData('staff', []));
+
+  const [staff, setStaff] = useState<StaffMember[]>(() => {
+    try {
+      const stored = readStoredData<any[]>('staff', []);
+      return Array.isArray(stored) ? stored.map((item, idx) => normalizeStaffMember(item, idx + 1)) : [];
+    } catch {
+      return [];
+    }
+  });
+
   const [formState, setFormState] = useState<StaffFormState>(buildEmptyForm());
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -95,24 +154,33 @@ export default function Staff() {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   useEffect(() => {
-    window.localStorage.setItem('staff', JSON.stringify(staff));
+    try {
+      window.localStorage.setItem('staff', JSON.stringify(staff));
+    } catch (e) {
+      console.warn('Failed to save staff to localStorage:', e);
+    }
   }, [staff]);
 
   useEffect(() => {
+    let isMounted = true;
     const loadFromApi = async () => {
-      if (!window.api?.getToken?.()) return;
+      if (!window.api?.getToken?.() || !window.api?.getStaff) return;
       try {
         const response = await window.api.getStaff();
-        const apiStaff = Array.isArray(response?.data) ? (response.data as StaffMember[]) : [];
-        if (apiStaff.length) {
-          setStaff(apiStaff);
-          window.localStorage.setItem('staff', JSON.stringify(apiStaff));
+        const rawData = response?.data;
+        if (Array.isArray(rawData) && isMounted) {
+          const normalized = rawData.map((item, idx) => normalizeStaffMember(item, idx + 1));
+          setStaff(normalized);
+          window.localStorage.setItem('staff', JSON.stringify(normalized));
         }
-      } catch {
-        // fallback
+      } catch (err) {
+        console.warn('Could not load staff from API, using cached data:', err);
       }
     };
     loadFromApi();
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -126,16 +194,23 @@ export default function Staff() {
   };
 
   const filteredStaff = useMemo(() => {
+    if (!Array.isArray(staff)) return [];
     return staff.filter((member) => {
-      const term = search.trim().toLowerCase();
+      if (!member) return false;
+      const term = (search || '').trim().toLowerCase();
+      const name = (member.name || '').toLowerCase();
+      const phone = (member.phone || '').toLowerCase();
+      const role = (member.role || '').toLowerCase();
+      const serial = (member.staffSerial || '').toLowerCase();
+
       const matchesSearch =
         !term ||
-        member.name.toLowerCase().includes(term) ||
-        (member.phone || '').includes(term) ||
-        member.role.toLowerCase().includes(term) ||
-        member.staffSerial.toLowerCase().includes(term);
+        name.includes(term) ||
+        phone.includes(term) ||
+        role.includes(term) ||
+        serial.includes(term);
 
-      const matchesPayType = payTypeFilter === 'all' || member.payType === payTypeFilter;
+      const matchesPayType = payTypeFilter === 'all' || (member.payType || 'hour') === payTypeFilter;
 
       return matchesSearch && matchesPayType;
     });
@@ -159,30 +234,38 @@ export default function Staff() {
     let fixed = 0;
     let percent = 0;
 
-    staff.forEach((member) => {
-      if (member.payType === 'hour') {
-        hour += member.rate * member.hours;
-      } else if (member.payType === 'percent') {
-        percent += (member.rate / 100) * member.revenue;
-      } else {
-        fixed += member.rate;
-      }
-    });
+    if (Array.isArray(staff)) {
+      staff.forEach((member) => {
+        if (!member) return;
+        const rate = Number(member.rate) || 0;
+        const hours = Number(member.hours) || 0;
+        const revenue = Number(member.revenue) || 0;
+
+        if (member.payType === 'hour') {
+          hour += rate * hours;
+        } else if (member.payType === 'percent') {
+          percent += (rate / 100) * revenue;
+        } else {
+          fixed += rate;
+        }
+      });
+    }
 
     return { total: staff.length, hour, fixed, percent, grandTotal: hour + fixed + percent };
   }, [staff]);
 
   const handleEdit = (index: number) => {
     const member = staff[index];
+    if (!member) return;
     setEditingIndex(index);
     setFormState({
-      name: member.name,
+      name: member.name || '',
       phone: member.phone ?? '',
-      role: member.role,
-      payType: member.payType,
-      rate: member.rate,
-      hours: member.hours,
-      revenue: member.revenue,
+      role: member.role || '',
+      payType: member.payType || 'hour',
+      rate: member.rate || 0,
+      hours: member.hours || 0,
+      revenue: member.revenue || 0,
     });
     setIsModalOpen(true);
   };
@@ -193,84 +276,125 @@ export default function Staff() {
     setFormState(buildEmptyForm());
   };
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const handleSubmit = async () => {
+    const trimmedName = formState.name.trim();
+    const trimmedRole = formState.role.trim();
 
-    const staffPayload = {
-      name: formState.name,
-      phone: formState.phone,
-      role: formState.role,
-      pay_type: formState.payType,
-      rate: formState.rate,
-      hours: formState.hours,
-      revenue: formState.revenue,
-    };
+    if (!trimmedName) {
+      showToast('اسم الموظف مطلوب', 'error');
+      return;
+    }
+    if (!trimmedRole) {
+      showToast('الوظيفة مطلوبة', 'error');
+      return;
+    }
 
     try {
-      if (editingIndex !== null) {
-        const member = staff[editingIndex];
-        if (window.api?.updateStaff && member.id) {
-          await window.api.updateStaff(member.id, staffPayload);
-        }
-        setStaff((current) =>
-          current.map((m, index) => (index === editingIndex ? { ...m, ...formState } : m))
-        );
-        showToast('تم تعديل بيانات الموظف بنجاح');
-      } else {
-        let newId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-          ? crypto.randomUUID()
-          : `${Date.now()}-${Math.random()}`;
-        const newSerial = formatStaffSerial(getNextStaffSequence(staff));
+      if (editingIndex !== null && staff[editingIndex]) {
+        const targetMember = staff[editingIndex];
+        const staffPayload = {
+          name: trimmedName,
+          phone: formState.phone.trim() || null,
+          role: trimmedRole,
+          pay_type: formState.payType,
+          rate: Number(formState.rate) || 0,
+          hours: Number(formState.hours) || 0,
+          revenue: Number(formState.revenue) || 0,
+        };
 
-        if (window.api?.createStaff) {
-          const response = await window.api.createStaff({ ...staffPayload, staff_serial: newSerial });
-          const createResult = response as { data?: StaffMember };
-          if (createResult?.data) {
-            newId = createResult.data.id;
+        if (window.api?.updateStaff && targetMember.id) {
+          try {
+            await window.api.updateStaff(targetMember.id, staffPayload);
+          } catch (apiErr) {
+            console.warn('API update failed, updating locally:', apiErr);
           }
         }
 
-        setStaff((current) => [
-          ...current,
-          {
-            id: newId,
-            staffSerial: newSerial,
-            ...formState,
-          },
-        ]);
+        setStaff((current) =>
+          current.map((m, index) =>
+            index === editingIndex
+              ? {
+                  ...m,
+                  name: trimmedName,
+                  phone: formState.phone.trim(),
+                  role: trimmedRole,
+                  payType: formState.payType,
+                  rate: Number(formState.rate) || 0,
+                  hours: Number(formState.hours) || 0,
+                  revenue: Number(formState.revenue) || 0,
+                }
+              : m
+          )
+        );
+        showToast('تم تعديل بيانات الموظف بنجاح');
+      } else {
+        const nextSeq = getNextStaffSequence(staff);
+        const newSerial = formatStaffSerial(nextSeq);
+
+        let newId =
+          typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+            ? crypto.randomUUID()
+            : `${Date.now()}-${Math.random()}`;
+
+        const staffPayload = {
+          staff_serial: newSerial,
+          name: trimmedName,
+          phone: formState.phone.trim() || null,
+          role: trimmedRole,
+          pay_type: formState.payType,
+          rate: Number(formState.rate) || 0,
+          hours: Number(formState.hours) || 0,
+          revenue: Number(formState.revenue) || 0,
+        };
+
+        if (window.api?.createStaff) {
+          try {
+            const response = await window.api.createStaff(staffPayload);
+            const serverData = (response as any)?.data;
+            if (serverData?.id) {
+              newId = serverData.id;
+            }
+          } catch (apiErr) {
+            console.warn('API create failed, adding locally:', apiErr);
+          }
+        }
+
+        const newMember: StaffMember = {
+          id: newId,
+          staffSerial: newSerial,
+          name: trimmedName,
+          phone: formState.phone.trim(),
+          role: trimmedRole,
+          payType: formState.payType,
+          rate: Number(formState.rate) || 0,
+          hours: Number(formState.hours) || 0,
+          revenue: Number(formState.revenue) || 0,
+        };
+
+        setStaff((current) => [...current, newMember]);
         showToast('تم إضافة الموظف بنجاح');
       }
-    } catch {
-      if (editingIndex !== null) {
-        setStaff((current) =>
-          current.map((m, index) => (index === editingIndex ? { ...m, ...formState } : m))
-        );
-      } else {
-        setStaff((current) => [
-          ...current,
-          {
-            id: `${Date.now()}-${Math.random()}`,
-            staffSerial: formatStaffSerial(getNextStaffSequence(current)),
-            ...formState,
-          },
-        ]);
-      }
-      showToast('تم الحفظ محلياً بنجاح');
+    } catch (err) {
+      console.error('Unhandled error in handleSubmit:', err);
+      showToast('حدث خطأ أثناء حفظ البيانات', 'error');
+    } finally {
+      closeModal();
     }
-
-    closeModal();
   };
 
   const handleDelete = async (index: number) => {
     if (!window.confirm('هل تريد حذف هذا الموظف؟')) return;
     const member = staff[index];
+    if (!member) return;
+
     try {
       if (window.api?.deleteStaff && member.id) {
         await window.api.deleteStaff(member.id);
       }
-    } catch {
-      // fallback
+    } catch (apiErr) {
+      console.warn('API delete failed, removing locally:', apiErr);
     }
+
     setStaff((current) => current.filter((_, idx) => idx !== index));
     showToast('تم حذف الموظف بنجاح');
     if (editingIndex === index) {
@@ -281,7 +405,7 @@ export default function Staff() {
 
   const handleInlineUpdate = (id: string, key: 'hours' | 'revenue', value: number) => {
     setStaff((current) =>
-      current.map((member) => (member.id === id ? { ...member, [key]: value } : member))
+      current.map((member) => (member.id === id ? { ...member, [key]: Math.max(0, value || 0) } : member))
     );
   };
 
@@ -295,9 +419,12 @@ export default function Staff() {
     if (cleanPhone.startsWith('01')) cleanPhone = '2' + cleanPhone;
 
     const calculatePay = () => {
-      if (member.payType === 'hour') return member.rate * member.hours;
-      if (member.payType === 'percent') return (member.rate / 100) * member.revenue;
-      return member.rate;
+      const rate = Number(member.rate) || 0;
+      const hours = Number(member.hours) || 0;
+      const revenue = Number(member.revenue) || 0;
+      if (member.payType === 'hour') return rate * hours;
+      if (member.payType === 'percent') return (rate / 100) * revenue;
+      return rate;
     };
 
     const caption = `*إيجي سبورتنج كلوب*\n\nبيان مستحقات الموظف/المدرب: ${member.name}\nالكود: ${member.staffSerial}\nالوظيفة: ${member.role}\nنوع التعاقد: ${payTypeLabel(member.payType)}\nالمبلغ المحسوب: ${calculatePay()} ج.م\n\nشكراً لجهودكم المتميزة ⚽`;
@@ -413,12 +540,15 @@ export default function Staff() {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {paginatedStaff.map((member) => {
               const originalIndex = staff.findIndex((m) => m.id === member.id);
+              const rate = Number(member.rate) || 0;
+              const hours = Number(member.hours) || 0;
+              const revenue = Number(member.revenue) || 0;
               const calculatedPay =
                 member.payType === 'hour'
-                  ? member.rate * member.hours
+                  ? rate * hours
                   : member.payType === 'percent'
-                  ? (member.rate / 100) * member.revenue
-                  : member.rate;
+                    ? (rate / 100) * revenue
+                    : rate;
 
               return (
                 <div
@@ -429,13 +559,13 @@ export default function Staff() {
                     <div className="flex items-start justify-between gap-2 border-b border-slate-100 pb-3">
                       <div className="flex items-center gap-2.5">
                         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-700 font-bold text-xs">
-                          {member.name.charAt(0) || 'م'}
+                          {member.name ? member.name.charAt(0) : 'م'}
                         </div>
                         <div>
                           <div className="flex items-center gap-1.5">
-                            <h3 className="font-bold text-slate-900 text-sm">{member.name}</h3>
+                            <h3 className="font-bold text-slate-900 text-sm">{member.name || 'بدون اسم'}</h3>
                             <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono text-slate-600">
-                              {member.staffSerial}
+                              {member.staffSerial || '-'}
                             </span>
                           </div>
                           <p className="text-[11px] text-slate-400">{member.role || 'عضو طاقم'}</p>
@@ -520,19 +650,22 @@ export default function Staff() {
               <tbody className="divide-y divide-slate-100 bg-white">
                 {paginatedStaff.map((member) => {
                   const originalIndex = staff.findIndex((m) => m.id === member.id);
+                  const rate = Number(member.rate) || 0;
+                  const hours = Number(member.hours) || 0;
+                  const revenue = Number(member.revenue) || 0;
                   const calculatedPay =
                     member.payType === 'hour'
-                      ? member.rate * member.hours
+                      ? rate * hours
                       : member.payType === 'percent'
-                      ? (member.rate / 100) * member.revenue
-                      : member.rate;
+                        ? (rate / 100) * revenue
+                        : rate;
 
                   return (
                     <tr key={member.id} className="hover:bg-slate-50/70 transition">
-                      <td className="px-4 py-3 font-mono font-medium text-slate-700">{member.staffSerial}</td>
-                      <td className="px-4 py-3 font-bold text-slate-900">{member.name}</td>
+                      <td className="px-4 py-3 font-mono font-medium text-slate-700">{member.staffSerial || '-'}</td>
+                      <td className="px-4 py-3 font-bold text-slate-900">{member.name || 'بدون اسم'}</td>
                       <td className="px-4 py-3 font-mono text-slate-600">{member.phone || '-'}</td>
-                      <td className="px-4 py-3 text-slate-700">{member.role}</td>
+                      <td className="px-4 py-3 text-slate-700">{member.role || '-'}</td>
                       <td className="px-4 py-3">
                         <span
                           className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold ${payTypeBadgeStyle(
@@ -542,19 +675,21 @@ export default function Staff() {
                           {payTypeLabel(member.payType)}
                         </span>
                       </td>
-                      <td className="px-4 py-3 font-semibold text-slate-800">{member.rate} ج</td>
+                      <td className="px-4 py-3 font-semibold text-slate-800">{rate} ج</td>
                       <td className="px-4 py-3">
                         {member.payType === 'hour' ? (
                           <input
                             type="number"
-                            value={member.hours}
+                            min={0}
+                            value={member.hours ?? 0}
                             onChange={(e) => handleInlineUpdate(member.id, 'hours', Number(e.target.value))}
                             className="w-16 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-center font-bold text-slate-900 outline-none focus:border-sky-500"
                           />
                         ) : member.payType === 'percent' ? (
                           <input
                             type="number"
-                            value={member.revenue}
+                            min={0}
+                            value={member.revenue ?? 0}
                             onChange={(e) => handleInlineUpdate(member.id, 'revenue', Number(e.target.value))}
                             className="w-20 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-center font-bold text-slate-900 outline-none focus:border-sky-500"
                           />
@@ -643,11 +778,12 @@ export default function Staff() {
               </button>
             </div>
 
-            <form id="staffModalForm" onSubmit={handleSubmit} className="space-y-4 p-5 text-right text-xs">
+            <div className="space-y-4 p-5 text-right text-xs">
               <div>
-                <label className="block mb-1 font-semibold text-slate-700">اسم الموظف / المدرب</label>
+                <label className="block mb-1 font-semibold text-slate-700">
+                  اسم الموظف / المدرب <span className="text-rose-500">*</span>
+                </label>
                 <input
-                  required
                   value={formState.name}
                   placeholder="مثال: كابتن أحمد محمود"
                   onChange={(e) => setFormState((prev) => ({ ...prev, name: e.target.value }))}
@@ -656,19 +792,34 @@ export default function Staff() {
               </div>
 
               <div>
-                <label className="block mb-1 font-semibold text-slate-700">رقم الهاتف</label>
+                <label className="block mb-1 font-semibold text-slate-700">
+                  رقم الهاتف
+                  <span
+                    className={`mr-1 text-[10px] font-normal ${
+                      formState.phone.length >= 11 ? 'text-emerald-500' : 'text-slate-400'
+                    }`}
+                  >
+                    ({formState.phone.length}/12)
+                  </span>
+                </label>
                 <input
                   value={formState.phone}
-                  placeholder="01000000000"
-                  onChange={(e) => setFormState((prev) => ({ ...prev, phone: e.target.value }))}
+                  placeholder="01000000000 أو 201000000000"
+                  inputMode="numeric"
+                  maxLength={12}
+                  onChange={(e) => {
+                    const digits = e.target.value.replace(/\D/g, '').slice(0, 12);
+                    setFormState((prev) => ({ ...prev, phone: digits }));
+                  }}
                   className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
                 />
               </div>
 
               <div>
-                <label className="block mb-1 font-semibold text-slate-700">الوظيفة / التخصص</label>
+                <label className="block mb-1 font-semibold text-slate-700">
+                  الوظيفة / التخصص <span className="text-rose-500">*</span>
+                </label>
                 <input
-                  required
                   value={formState.role}
                   placeholder="مدرب كرة قدم / إداري"
                   onChange={(e) => setFormState((prev) => ({ ...prev, role: e.target.value }))}
@@ -691,7 +842,7 @@ export default function Staff() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block mb-1 font-semibold text-slate-700">القيمة / المبلع</label>
+                  <label className="block mb-1 font-semibold text-slate-700">القيمة / المبلغ</label>
                   <input
                     type="number"
                     min={0}
@@ -708,7 +859,15 @@ export default function Staff() {
                   <input
                     type="number"
                     min={0}
-                    value={formState.payType === 'percent' ? (formState.revenue === 0 ? '' : formState.revenue) : (formState.hours === 0 ? '' : formState.hours)}
+                    value={
+                      formState.payType === 'percent'
+                        ? formState.revenue === 0
+                          ? ''
+                          : formState.revenue
+                        : formState.hours === 0
+                        ? ''
+                        : formState.hours
+                    }
                     onChange={(e) => {
                       const val = Math.max(0, Number(e.target.value));
                       setFormState((prev) => ({
@@ -721,23 +880,23 @@ export default function Staff() {
                   />
                 </div>
               </div>
-            </form>
 
-            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/50 px-5 py-3">
-              <button
-                type="button"
-                onClick={closeModal}
-                className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition"
-              >
-                إلغاء
-              </button>
-              <button
-                type="submit"
-                form="staffModalForm"
-                className="rounded-xl bg-sky-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-sky-700 transition"
-              >
-                {editingIndex !== null ? 'حفظ التعديلات' : 'إضافة الموظف'}
-              </button>
+              <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/50 -mx-5 -mb-5 px-5 py-3 mt-4">
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { void handleSubmit(); }}
+                  className="rounded-xl bg-sky-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-sky-700 transition"
+                >
+                  {editingIndex !== null ? 'حفظ التعديلات' : 'إضافة الموظف'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

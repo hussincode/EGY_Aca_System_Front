@@ -202,6 +202,63 @@ function getEffectiveSubscriptionStatus(sub: SubscriptionRecord | undefined | nu
   return 'active';
 }
 
+function getSubscriptionBranch(
+  sub?: Partial<SubscriptionRecord> | null,
+  playersList: Player[] = [],
+  branchesList: Branch[] = []
+): string {
+  if (!sub) return '';
+
+  const playerId = String(sub.playerId || (sub as any).player_id || '').trim();
+  const playerCode = String(sub.playerCode || (sub as any).player_code || '').trim();
+  const playerName = String(sub.player || (sub as any).player_name || '').trim();
+
+  // 1. Primary Source of Truth: Match player from Players.tsx list
+  const player = playersList.find((p) => {
+    if (playerId && String(p.id).trim() === playerId) return true;
+    if (playerCode && (String(p.playerSerial || '').trim() === playerCode || String((p as any).serial || '').trim() === playerCode)) return true;
+    if (playerName && String(p.name || '').trim().toLowerCase() === playerName.toLowerCase()) return true;
+    return false;
+  });
+
+  if (player) {
+    const pBranch = String(player.branch || (player as any).branch_name || '').trim();
+    if (pBranch && !['null', 'undefined', 'بدون فرع'].includes(pBranch.toLowerCase())) {
+      const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (GUID_RE.test(pBranch) && branchesList.length) {
+        const b = branchesList.find((br) => br.id.toLowerCase() === pBranch.toLowerCase());
+        if (b?.name) return b.name;
+      }
+      return pBranch;
+    }
+    const pBranchId = String(player.branchId || (player as any).branch_id || '').trim();
+    if (pBranchId && branchesList.length) {
+      const b = branchesList.find((br) => br.id.toLowerCase() === pBranchId.toLowerCase());
+      if (b?.name) return b.name;
+    }
+  }
+
+  // 2. Secondary: If branchId is a valid branch GUID
+  const rawBranchId = String(sub.branchId || (sub as any).branch_id || '').trim();
+  if (rawBranchId && branchesList.length) {
+    const b = branchesList.find((br) => br.id.toLowerCase() === rawBranchId.toLowerCase());
+    if (b?.name) return b.name;
+  }
+
+  // 3. Fallback to sub.branch
+  const rawBranch = String(sub.branch || (sub as any).branch_name || '').trim();
+  if (rawBranch && !['null', 'undefined', 'بدون فرع'].includes(rawBranch.toLowerCase())) {
+    const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (GUID_RE.test(rawBranch) && branchesList.length) {
+      const b = branchesList.find((br) => br.id.toLowerCase() === rawBranch.toLowerCase());
+      if (b?.name) return b.name;
+    }
+    return rawBranch;
+  }
+
+  return '';
+}
+
 export default function Subscriptions() {
   const { canEdit } = useAuth();
   const canEditSubs = canEdit('subscriptions');
@@ -228,6 +285,36 @@ export default function Subscriptions() {
 
   const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
   const invoiceCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  const [playerSearchQuery, setPlayerSearchQuery] = useState('');
+  const [isPlayerDropdownOpen, setIsPlayerDropdownOpen] = useState(false);
+  const playerDropdownRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (playerDropdownRef.current && !playerDropdownRef.current.contains(event.target as Node)) {
+        setIsPlayerDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  const modalFilteredPlayers = useMemo(() => {
+    if (!playerSearchQuery.trim()) return players.slice(0, 30);
+    const q = playerSearchQuery.trim().toLowerCase();
+    return players
+      .filter((p) => {
+        const name = (p.name || '').toLowerCase();
+        const serial = (p.playerSerial || (p as any).serial || '').toLowerCase();
+        const phone = (p.phone || '').toLowerCase();
+        const game = (p.game || (p as any).sport || '').toLowerCase();
+        return name.includes(q) || serial.includes(q) || phone.includes(q) || game.includes(q);
+      })
+      .slice(0, 50);
+  }, [players, playerSearchQuery]);
 
   /* ── Load from API ─────────────────────────────────────────── */
   useEffect(() => {
@@ -275,15 +362,32 @@ export default function Subscriptions() {
 
         const rawSubs = Array.isArray(subsResponse?.data) ? subsResponse.data : [];
         const normalizedSubs: SubscriptionRecord[] = rawSubs.map((item: any) => {
-          const playerId = String(item.playerId || item.player_id || '');
-          const playerObj = playerMap.get(playerId);
-          const rawBranchId = String(item.branchId || item.branch_id || playerObj?.branch_id || playerObj?.branchId || '');
-          const rawBranchName = String(item.branch || item.branch_name || playerObj?.branch_name || playerObj?.branch || branchMap.get(rawBranchId) || '');
-          const cleanBranch = ['null', 'undefined', 'بدون فرع'].includes(rawBranchName.trim().toLowerCase()) ? '' : rawBranchName.trim();
+          const playerId = String(item.playerId || item.player_id || '').trim();
+          const playerCode = String(item.playerCode || item.player_code || item.playerSerial || item.player_serial || '').trim();
+          const playerName = String(item.player || item.player_name || '').trim();
+
+          const playerObj: any =
+            (playerId ? playerMap.get(playerId) : null) ||
+            loadedPlayers.find((p) =>
+              (playerId && p.id === playerId) ||
+              (playerCode && p.playerSerial === playerCode) ||
+              (playerName && p.name.trim().toLowerCase() === playerName.toLowerCase())
+            );
+
+          const playerBranchName = String(playerObj?.branch || playerObj?.branch_name || '');
+          const playerBranchId = String(playerObj?.branchId || playerObj?.branch_id || '');
+
+          const rawBranchId = playerBranchId || String(item.branchId || item.branch_id || '');
+          const resolvedBranchFromName = playerBranchName && !['null', 'undefined', 'بدون فرع'].includes(playerBranchName.toLowerCase()) ? playerBranchName : '';
+          const resolvedBranchFromId = rawBranchId ? branchMap.get(rawBranchId) : '';
+          const rawSubBranch = String(item.branch_name || item.branch || '');
+          const fallbackSubBranch = rawSubBranch && !['null', 'undefined', 'بدون فرع'].includes(rawSubBranch.toLowerCase()) ? rawSubBranch : '';
+
+          const cleanBranch = (resolvedBranchFromName || resolvedBranchFromId || fallbackSubBranch || '').trim();
 
           return {
             id: String(item.id || ''),
-            playerId,
+            playerId: playerId || (playerObj ? String(playerObj.id) : ''),
             player: String(item.player || item.player_name || playerObj?.name || ''),
             playerCode: String(item.playerCode || item.player_code || item.playerSerial || playerObj?.player_serial || playerObj?.playerSerial || ''),
             game: String(item.game || item.game_name || playerObj?.game_name || playerObj?.game || ''),
@@ -461,9 +565,13 @@ export default function Subscriptions() {
   const uniqueBranchOptions = useMemo(() => {
     const names = new Set<string>();
     branches.forEach((b) => { if (b.name && b.name.trim()) names.add(b.name.trim()); });
-    subscriptions.forEach((s) => { if (s.branch && s.branch.trim()) names.add(s.branch.trim()); });
+    players.forEach((p) => { if (p.branch && p.branch.trim()) names.add(p.branch.trim()); });
+    subscriptions.forEach((s) => {
+      const b = getSubscriptionBranch(s, players, branches);
+      if (b && b.trim()) names.add(b.trim());
+    });
     return Array.from(names).sort();
-  }, [branches, subscriptions]);
+  }, [branches, players, subscriptions]);
 
   const uniqueGameOptions = useMemo(() => {
     return Array.from(new Set(subscriptions.map((sub) => sub.game || '').filter(Boolean))).sort();
@@ -487,14 +595,17 @@ export default function Subscriptions() {
       if (paymentFilter === 'fullyPaid') matchesPayment = remaining <= 0;
 
       let matchesBranch = true;
-      if (branchFilter !== 'all') matchesBranch = (sub.branch || '') === branchFilter;
+      if (branchFilter !== 'all') {
+        const subBranch = getSubscriptionBranch(sub, players, branches);
+        matchesBranch = (subBranch || '') === branchFilter || (sub.branch || '') === branchFilter;
+      }
 
       let matchesGame = true;
       if (gameFilter !== 'all') matchesGame = sub.game === gameFilter;
 
       return matchesSearch && matchesStatus && matchesPayment && matchesBranch && matchesGame;
     });
-  }, [branchFilter, gameFilter, paymentFilter, searchText, statusFilter, subscriptions]);
+  }, [branchFilter, gameFilter, paymentFilter, searchText, statusFilter, subscriptions, players, branches]);
 
   const [currentPage, setCurrentPage] = useState(1);
   const rowsPerPage = 10;
@@ -512,12 +623,15 @@ export default function Subscriptions() {
   /* ── Modal & Handler Actions ────────────────────────────────── */
   const openAddSubscription = () => {
     setFormState({ ...emptyFormState, startDate: '', endDate: '' });
+    setPlayerSearchQuery('');
+    setIsPlayerDropdownOpen(false);
     setIsSubscriptionModalOpen(true);
   };
 
   const openEditSubscription = (subscription: SubscriptionRecord) => {
     const scheduleArray = subscription.schedule ? subscription.schedule.split(', ').filter(Boolean) : [];
     const [startTime, endTime] = (subscription.trainingTime || '').split(' - ');
+    const foundPlayer = players.find((p) => p.id === subscription.playerId);
     setFormState({
       id: subscription.id,
       playerId: subscription.playerId,
@@ -532,12 +646,16 @@ export default function Subscriptions() {
       endDate: subscription.endDate,
       invoiceNumber: subscription.invoiceNumber || '',
     });
+    setPlayerSearchQuery(foundPlayer?.name || subscription.player || '');
+    setIsPlayerDropdownOpen(false);
     setIsSubscriptionModalOpen(true);
   };
 
   const closeSubscriptionModal = () => {
     setIsSubscriptionModalOpen(false);
     setFormState(emptyFormState);
+    setPlayerSearchQuery('');
+    setIsPlayerDropdownOpen(false);
   };
 
   const updateForm = (field: keyof SubscriptionFormState, value: string | number | string[]) => {
@@ -558,6 +676,12 @@ export default function Subscriptions() {
       trainingTimeStart: startTime || prev.trainingTimeStart,
       trainingTimeEnd: endTime || prev.trainingTimeEnd,
     }));
+  };
+
+  const handleSelectPlayer = (player: Player) => {
+    handlePlayerChange(player.id);
+    setPlayerSearchQuery(player.name || '');
+    setIsPlayerDropdownOpen(false);
   };
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
@@ -596,10 +720,26 @@ export default function Subscriptions() {
 
     const paymentDelta = Math.max(0, formState.paidAmount - Number(existingSubscription?.paidAmount || 0));
 
-    const rawBranchName = selectedPlayer?.branch || (selectedPlayer as any)?.branch_name || existingSubscription?.branch || '';
-    const matchedBranch = branches.find((b) => b.name === rawBranchName || b.id === (selectedPlayer as any)?.branch_id || (selectedPlayer as any)?.branchId);
+    const rawBranchName =
+      selectedPlayer?.branch ||
+      (selectedPlayer as any)?.branch_name ||
+      (selectedPlayer as any)?.branchName ||
+      existingSubscription?.branch ||
+      '';
+    const matchedBranch = branches.find(
+      (b) =>
+        b.name === rawBranchName ||
+        (rawBranchName && b.name?.trim().toLowerCase() === rawBranchName.trim().toLowerCase()) ||
+        b.id === (selectedPlayer as any)?.branch_id ||
+        b.id === (selectedPlayer as any)?.branchId
+    );
     const branchName = rawBranchName || matchedBranch?.name || '';
-    const branchId = matchedBranch?.id || (selectedPlayer as any)?.branch_id || (selectedPlayer as any)?.branchId || existingSubscription?.branchId || '';
+    const branchId =
+      matchedBranch?.id ||
+      (selectedPlayer as any)?.branch_id ||
+      (selectedPlayer as any)?.branchId ||
+      existingSubscription?.branchId ||
+      '';
 
     let subscription: SubscriptionRecord = {
       id: formState.id || createStableId('sub'),
@@ -1206,7 +1346,11 @@ export default function Subscriptions() {
                           <span className="font-medium text-sky-700 bg-sky-50 px-2 py-0.5 rounded-md">
                             ⚽ {sub.game}
                           </span>
-                          {sub.branch && <span className="text-slate-400">• {sub.branch}</span>}
+                          {getSubscriptionBranch(sub, players, branches) && (
+                            <span className="text-slate-500 font-medium bg-slate-100 px-2 py-0.5 rounded-md">
+                              📍 {getSubscriptionBranch(sub, players, branches)}
+                            </span>
+                          )}
                           {sub.invoiceNumber && <span className="text-slate-400"># {sub.invoiceNumber}</span>}
                         </div>
                       </div>
@@ -1355,7 +1499,7 @@ export default function Subscriptions() {
                       <td className="px-4 py-3 font-mono font-medium text-slate-700">{sub.invoiceNumber || '-'}</td>
                       <td className="px-4 py-3 font-mono text-slate-500">{sub.playerCode || '-'}</td>
                       <td className="px-4 py-3 font-bold text-slate-900">{sub.player}</td>
-                      <td className="px-4 py-3 text-slate-600 font-medium">{sub.branch || '-'}</td>
+                      <td className="px-4 py-3 text-slate-700 font-medium">{getSubscriptionBranch(sub, players, branches) || '—'}</td>
                       <td className="px-4 py-3 text-slate-700">{sub.game}</td>
                       <td className="px-4 py-3 text-slate-600">{formattedSchedule(sub)}</td>
                       <td className="px-4 py-3 font-bold text-slate-800">{sub.sessions}</td>
@@ -1435,27 +1579,112 @@ export default function Subscriptions() {
             </div>
 
             <form onSubmit={handleSubscriptionSave} className="mt-4 grid gap-3 sm:grid-cols-2 text-xs">
-              <div className="space-y-1">
-                <label className="font-semibold text-slate-700">اللاعب</label>
-                <select
-                  value={formState.playerId}
-                  onChange={(event) => handlePlayerChange(event.target.value)}
-                  required
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-right outline-none"
-                >
-                  <option value="">اختر اللاعب</option>
-                  {players.map((player) => (
-                    <option key={player.id} value={player.id}>
-                      {player.name} {player.playerSerial ? `- ${player.playerSerial}` : ''} {player.game ? `(${player.game})` : ''}
-                    </option>
-                  ))}
-                </select>
+              <div className="space-y-1 relative" ref={playerDropdownRef}>
+                <label className="font-semibold text-slate-700 flex items-center justify-between">
+                  <span>اللاعب <span className="text-rose-500">*</span></span>
+                  {formState.playerId && (
+                    <span className="text-[10px] font-normal text-sky-600 truncate max-w-[180px]">
+                      تم الاختيار: {players.find((p) => p.id === formState.playerId)?.name || ''}
+                    </span>
+                  )}
+                </label>
+                
+                <div className="relative">
+                  <SearchSm className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={playerSearchQuery}
+                    onFocus={() => setIsPlayerDropdownOpen(true)}
+                    onChange={(e) => {
+                      setPlayerSearchQuery(e.target.value);
+                      setIsPlayerDropdownOpen(true);
+                      if (!e.target.value) {
+                        handlePlayerChange('');
+                      }
+                    }}
+                    placeholder="ابحث باسم اللاعب، الكود (PLY-..)، أو الهاتف..."
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pr-9 pl-7 text-right text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white transition"
+                    required={!formState.playerId}
+                  />
+                  {playerSearchQuery ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPlayerSearchQuery('');
+                        handlePlayerChange('');
+                        setIsPlayerDropdownOpen(true);
+                      }}
+                      className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs px-1"
+                      title="مسح البحث"
+                    >
+                      ✕
+                    </button>
+                  ) : null}
+                </div>
+
+                {isPlayerDropdownOpen && (
+                  <div className="absolute z-50 right-0 left-0 mt-1 max-h-56 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl divide-y divide-slate-100 text-xs">
+                    {modalFilteredPlayers.length > 0 ? (
+                      modalFilteredPlayers.map((player) => {
+                        const isSelected = player.id === formState.playerId;
+                        return (
+                          <div
+                            key={player.id}
+                            onClick={() => handleSelectPlayer(player)}
+                            className={`flex items-center justify-between p-2.5 cursor-pointer transition hover:bg-sky-50 ${
+                              isSelected ? 'bg-sky-50/90 font-bold text-sky-700' : 'text-slate-800'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-slate-700 font-bold text-[11px]">
+                                {player.name ? player.name.charAt(0) : 'ل'}
+                              </div>
+                              <div className="text-right">
+                                <p className="font-semibold text-slate-900">{player.name}</p>
+                                <div className="flex items-center gap-2 text-[10px] text-slate-400 font-normal">
+                                  {player.phone && <span>📞 {player.phone}</span>}
+                                  {player.branch && <span>📍 {player.branch}</span>}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5 text-left">
+                              {player.playerSerial && (
+                                <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-600">
+                                  {player.playerSerial}
+                                </span>
+                              )}
+                              {player.game && (
+                                <span className="rounded bg-sky-100 px-1.5 py-0.5 text-[10px] text-sky-700 font-medium">
+                                  {player.game}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="p-4 text-center text-slate-400 text-xs">
+                        لا يوجد لاعب بهذا الاسم أو الكود
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="space-y-1">
                 <label className="font-semibold text-slate-700">اللعبة (تلقائي من اللاعب)</label>
                 <div className="w-full rounded-xl border border-slate-200 bg-slate-100 p-2.5 text-right font-medium text-slate-700 flex items-center justify-between">
                   <span>{players.find((p) => p.id === formState.playerId)?.game || formState.game || '— غير محددة باللاعب —'}</span>
+                  <span className="rounded-md bg-slate-200/80 px-2 py-0.5 text-[10px] text-slate-600">تلقائي</span>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-semibold text-slate-700">الفرع (تلقائي من اللاعب)</label>
+                <div className="w-full rounded-xl border border-slate-200 bg-slate-100 p-2.5 text-right font-medium text-slate-700 flex items-center justify-between">
+                  <span className="text-slate-800 font-semibold">
+                    {players.find((p) => p.id === formState.playerId)?.branch || (players.find((p) => p.id === formState.playerId) as any)?.branch_name || '— بدون فرع —'}
+                  </span>
                   <span className="rounded-md bg-slate-200/80 px-2 py-0.5 text-[10px] text-slate-600">تلقائي</span>
                 </div>
               </div>

@@ -98,17 +98,71 @@ const emptyForm: FinanceForm = {
   description: '',
 };
 
-function normalizeFinanceFromApi(row: Record<string, unknown>, branchesList: Branch[] = []): FinanceEntry | null {
+function normalizeArabicBranch(str: string = ''): string {
+  if (!str) return '';
+  return str
+    .trim()
+    .toLowerCase()
+    .replace(/^فرع\s+/, '')
+    .replace(/[أإآ]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/ى/g, 'ي')
+    .replace(/\s+/g, ' ');
+}
+
+function branchesMatch(a: string = '', b: string = ''): boolean {
+  if (!a || !b) return false;
+  if (a.toLowerCase() === b.toLowerCase()) return true;
+  const normA = normalizeArabicBranch(a);
+  const normB = normalizeArabicBranch(b);
+  if (!normA || !normB) return false;
+  return normA === normB || normA.includes(normB) || normB.includes(normA);
+}
+
+function normalizeFinanceFromApi(
+  row: Record<string, unknown>,
+  branchesList: Branch[] = [],
+  playersList: any[] = [],
+  subscriptionsList: any[] = []
+): FinanceEntry | null {
   if (!row) return null;
   const bId = String(row.branch_id || row.branchId || '');
-  let bNameRaw = String(row.branchName || row.branch_name || row.branch || '');
+  let bNameRaw = String(row.branch_name || row.branchName || row.branch || '').trim();
 
   if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(bNameRaw)) {
     bNameRaw = '';
   }
 
-  const matchedBranch = branchesList.find((b) => (b.id && b.id === bId) || (b.name && b.name === bNameRaw));
-  const finalBranchName = bNameRaw || matchedBranch?.name || '';
+  const matchedBranch = branchesList.find(
+    (b) =>
+      (b.id && bId && b.id.toLowerCase() === bId.toLowerCase()) ||
+      (b.name && bNameRaw && branchesMatch(b.name, bNameRaw))
+  );
+  let finalBranchName = bNameRaw || matchedBranch?.name || '';
+
+  const relatedTo = String(row.related_to || row.relatedTo || '').trim();
+
+  // Fallback lookup from subscriptions or players if branch is still empty
+  if (!finalBranchName && relatedTo) {
+    const cleanRel = relatedTo.toLowerCase();
+    const subMatch = subscriptionsList.find(
+      (s) =>
+        (s.player && String(s.player).trim().toLowerCase() === cleanRel) ||
+        (s.playerCode && String(s.playerCode).trim().toLowerCase() === cleanRel)
+    );
+    if (subMatch?.branch && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(subMatch.branch)) {
+      finalBranchName = subMatch.branch;
+    } else {
+      const plyMatch = playersList.find(
+        (p) =>
+          (p.name && String(p.name).trim().toLowerCase() === cleanRel) ||
+          (p.playerSerial && String(p.playerSerial).trim().toLowerCase() === cleanRel)
+      );
+      if (plyMatch?.branch && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(plyMatch.branch)) {
+        finalBranchName = plyMatch.branch;
+      }
+    }
+  }
 
   return {
     id: String(row.id || ''),
@@ -117,19 +171,93 @@ function normalizeFinanceFromApi(row: Record<string, unknown>, branchesList: Bra
     branch: finalBranchName,
     branchId: bId || matchedBranch?.id || '',
     branchName: finalBranchName,
-    relatedTo: String(row.related_to || row.relatedTo || ''),
+    relatedTo,
     amount: Number(row.amount || 0),
     date: String(row.date || '').slice(0, 10),
     description: String(row.description || ''),
+    createdBy: (row.createdBy || row.created_by) as any,
   };
+}
+
+export function resolveBranchDisplayName(
+  entry: FinanceEntry,
+  branchesList: Branch[] = [],
+  playersList: any[] = [],
+  subscriptionsList: any[] = []
+): string {
+  if (entry.branch && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(entry.branch)) {
+    return entry.branch;
+  }
+  if (entry.branchName && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(entry.branchName)) {
+    return entry.branchName;
+  }
+  const idToMatch = entry.branchId || (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(entry.branch || '') ? entry.branch : '');
+  if (idToMatch && branchesList.length) {
+    const match = branchesList.find((b) => b.id && b.id.toLowerCase() === idToMatch.toLowerCase());
+    if (match?.name) return match.name;
+  }
+
+  // Cross-reference from subscriptions if relatedTo matches player or sourceId matches subscription
+  if (subscriptionsList.length) {
+    const cleanRel = String(entry.relatedTo || '').trim().toLowerCase();
+    const sourceId = String((entry as any).source_id || (entry as any).sourceId || '').trim().toLowerCase();
+    const subMatch = subscriptionsList.find(
+      (s) =>
+        (sourceId && s.id && String(s.id).toLowerCase() === sourceId) ||
+        (cleanRel && s.player && String(s.player).trim().toLowerCase() === cleanRel) ||
+        (cleanRel && s.playerCode && String(s.playerCode).trim().toLowerCase() === cleanRel)
+    );
+    if (subMatch) {
+      if (subMatch.branch && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(subMatch.branch)) {
+        return subMatch.branch;
+      }
+      if (subMatch.branchId && branchesList.length) {
+        const bMatch = branchesList.find((b) => b.id && b.id.toLowerCase() === subMatch.branchId.toLowerCase());
+        if (bMatch?.name) return bMatch.name;
+      }
+    }
+  }
+
+  // Cross-reference from players
+  if (entry.relatedTo && playersList.length) {
+    const cleanRel = entry.relatedTo.trim().toLowerCase();
+    const playerMatch = playersList.find(
+      (p) =>
+        (p.name && String(p.name).trim().toLowerCase() === cleanRel) ||
+        (p.playerSerial && String(p.playerSerial).trim().toLowerCase() === cleanRel)
+    );
+    if (playerMatch) {
+      if (playerMatch.branch && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(playerMatch.branch)) {
+        return playerMatch.branch;
+      }
+      if (playerMatch.branch_id && branchesList.length) {
+        const bMatch = branchesList.find((b) => b.id && b.id.toLowerCase() === playerMatch.branch_id.toLowerCase());
+        if (bMatch?.name) return bMatch.name;
+      }
+    }
+  }
+
+  return entry.branch || entry.branchName || '';
 }
 
 export default function Finance() {
   const { canEdit } = useAuth();
   const canEditFinance = canEdit('finance');
 
-  const [finances, setFinances] = useState<FinanceEntry[]>(() => readStoredData('finances', []));
   const [branches, setBranches] = useState<Branch[]>(() => readStoredData('branches', []));
+  const [players, setPlayers] = useState<any[]>(() => readStoredData('players', []));
+  const [subscriptions, setSubscriptions] = useState<any[]>(() => readStoredData('subscriptions', []));
+  const [finances, setFinances] = useState<FinanceEntry[]>(() => {
+    const initialBranches = readStoredData<Branch[]>('branches', []);
+    const initialPlayers = readStoredData<any[]>('players', []);
+    const initialSubs = readStoredData<any[]>('subscriptions', []);
+    const stored = readStoredData<any[]>('finances', []);
+    return Array.isArray(stored)
+      ? stored
+          .map((item) => normalizeFinanceFromApi(item, initialBranches, initialPlayers, initialSubs))
+          .filter((item): item is FinanceEntry => Boolean(item && item.id))
+      : [];
+  });
 
   const [search, setSearch] = useState('');
   const [filterMonth] = useState('');
@@ -153,53 +281,116 @@ export default function Finance() {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
 
   useEffect(() => {
+    let isMounted = true;
     const loadFromApi = async () => {
       const api = window.api;
       if (!api?.getToken?.()) return;
 
+      let currentBranches: Branch[] = readStoredData('branches', []);
+      let currentPlayers: any[] = readStoredData('players', []);
+      let currentSubs: any[] = readStoredData('subscriptions', []);
+
       try {
-        const [resFinances, resBranches] = await Promise.all([
-          api.getFinanceRecords?.(),
-          api.getBranches?.(),
-        ]);
-
-        const serverBranches = Array.isArray((resBranches as { data?: unknown[] })?.data)
-          ? ((resBranches as { data?: unknown[] }).data || [])
-          : [];
-        let mappedBranches: Branch[] = [];
-        if (serverBranches.length > 0) {
-          mappedBranches = serverBranches.map((item) => {
-            const b = item as Record<string, unknown>;
-            return { id: String(b.id || ''), name: String(b.name || '') };
-          });
-          setBranches(mappedBranches);
-          window.localStorage.setItem('branches', JSON.stringify(mappedBranches));
-        } else {
-          mappedBranches = readStoredData('branches', []);
+        if (api.getBranches) {
+          const resBranches = await api.getBranches();
+          const serverBranches = Array.isArray((resBranches as { data?: unknown[] })?.data)
+            ? ((resBranches as { data?: unknown[] }).data || [])
+            : [];
+          if (serverBranches.length > 0) {
+            currentBranches = serverBranches.map((item) => {
+              const b = item as Record<string, unknown>;
+              return { id: String(b.id || ''), name: String(b.name || '') };
+            });
+            if (isMounted) {
+              setBranches(currentBranches);
+              window.localStorage.setItem('branches', JSON.stringify(currentBranches));
+            }
+          }
         }
+      } catch (err) {
+        console.warn('Failed to load branches:', err);
+      }
 
-        const serverFinances = Array.isArray((resFinances as { data?: unknown[] })?.data)
-          ? ((resFinances as { data?: unknown[] }).data || [])
-          : [];
-        const mappedFinances = serverFinances
-          .map((item) => normalizeFinanceFromApi(item as Record<string, unknown>, mappedBranches))
-          .filter((item): item is FinanceEntry => Boolean(item && item.id));
-
-        if (mappedFinances.length > 0) {
-          setFinances(mappedFinances);
-          window.localStorage.setItem('finances', JSON.stringify(mappedFinances));
+      try {
+        if (api.getPlayers) {
+          const resPlayers = await api.getPlayers();
+          const serverPlayers = Array.isArray((resPlayers as { data?: unknown[] })?.data)
+            ? ((resPlayers as { data?: unknown[] }).data || [])
+            : [];
+          if (serverPlayers.length > 0) {
+            currentPlayers = serverPlayers;
+            if (isMounted) {
+              setPlayers(serverPlayers);
+              window.localStorage.setItem('players', JSON.stringify(serverPlayers));
+            }
+          }
         }
-      } catch {
-        // Fallback to local storage
+      } catch (err) {
+        console.warn('Failed to load players in finance:', err);
+      }
+
+      try {
+        if (api.getSubscriptions) {
+          const resSubs = await api.getSubscriptions();
+          const serverSubs = Array.isArray((resSubs as { data?: unknown[] })?.data)
+            ? ((resSubs as { data?: unknown[] }).data || [])
+            : [];
+          if (serverSubs.length > 0) {
+            currentSubs = serverSubs;
+            if (isMounted) {
+              setSubscriptions(serverSubs);
+              window.localStorage.setItem('subscriptions', JSON.stringify(serverSubs));
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to load subscriptions in finance:', err);
+      }
+
+      try {
+        if (api.getFinanceRecords) {
+          const resFinances = await api.getFinanceRecords();
+          const serverFinances = Array.isArray((resFinances as { data?: unknown[] })?.data)
+            ? ((resFinances as { data?: unknown[] }).data || [])
+            : [];
+          if (serverFinances.length > 0) {
+            const mappedFinances = serverFinances
+              .map((item) => normalizeFinanceFromApi(item as Record<string, unknown>, currentBranches, currentPlayers, currentSubs))
+              .filter((item): item is FinanceEntry => Boolean(item && item.id));
+
+            if (mappedFinances.length > 0 && isMounted) {
+              setFinances(mappedFinances);
+              window.localStorage.setItem('finances', JSON.stringify(mappedFinances));
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to load finance records:', err);
       }
     };
 
     loadFromApi();
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   useEffect(() => {
     const handleSync = () => {
-      setFinances(readStoredData('finances', []));
+      const currentBranches = readStoredData<Branch[]>('branches', []);
+      const currentPlayers = readStoredData<any[]>('players', []);
+      const currentSubs = readStoredData<any[]>('subscriptions', []);
+      setBranches(currentBranches);
+      setPlayers(currentPlayers);
+      setSubscriptions(currentSubs);
+      const stored = readStoredData<any[]>('finances', []);
+      if (Array.isArray(stored)) {
+        setFinances(
+          stored
+            .map((item) => normalizeFinanceFromApi(item, currentBranches, currentPlayers, currentSubs))
+            .filter((item): item is FinanceEntry => Boolean(item && item.id))
+        );
+      }
     };
     window.addEventListener('storage', handleSync);
     window.addEventListener('app:sync', handleSync);
@@ -263,10 +454,12 @@ export default function Finance() {
         (entry.category || '').toLowerCase().includes(search.toLowerCase());
 
       const matchesType = !filterType || entry.type === filterType;
+      const entryBranch = resolveBranchDisplayName(entry, branches, players, subscriptions);
       const matchesBranch =
         !filterBranch ||
-        entry.branch === filterBranch ||
-        entry.branchName === filterBranch ||
+        branchesMatch(entryBranch, filterBranch) ||
+        branchesMatch(entry.branch, filterBranch) ||
+        branchesMatch(entry.branchName, filterBranch) ||
         entry.branchId === filterBranch;
       const matchesCategory = !filterCategory || entry.category === filterCategory;
 
@@ -286,7 +479,7 @@ export default function Finance() {
 
       return matchesSearch && matchesType && matchesBranch && matchesCategory && matchesPeriod && matchesMonthFallback;
     });
-  }, [finances, search, filterType, filterBranch, filterCategory, periodMode, selectedYear, selectedMonth, startDate, endDate, filterMonth]);
+  }, [finances, search, filterType, filterBranch, filterCategory, periodMode, selectedYear, selectedMonth, startDate, endDate, filterMonth, branches, players, subscriptions]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -368,7 +561,7 @@ export default function Finance() {
       setFormData({
         type: entry.type,
         category: entry.category,
-        branch: entry.branch || entry.branchName || '',
+        branch: resolveBranchDisplayName(entry, branches, players, subscriptions),
         relatedTo: entry.relatedTo || '',
         amount: String(entry.amount),
         date: entry.date,
@@ -434,7 +627,7 @@ export default function Finance() {
         } else {
           const res = await window.api.createFinance?.(payload);
           const rawNew = (res as { data?: Record<string, unknown> })?.data;
-          const newEntry = rawNew ? normalizeFinanceFromApi(rawNew, branches) : null;
+          const newEntry = rawNew ? normalizeFinanceFromApi(rawNew, branches, players, subscriptions) : null;
           nextFinances = [newEntry || { ...payload, id: `fin_${Date.now()}` }, ...nextFinances];
           showToast('تم إضافة الحركة بنجاح');
         }
@@ -484,7 +677,7 @@ export default function Finance() {
         entry.date,
         entry.type === 'income' ? 'دخل' : 'مصروف',
         entry.category,
-        entry.branchName || entry.branch || '-',
+        resolveBranchDisplayName(entry, branches, players, subscriptions) || '-',
         entry.relatedTo || '-',
         entry.amount,
         entry.description || '-',
@@ -538,7 +731,7 @@ export default function Finance() {
     };
 
     drawLine('التاريخ', String(entry.date || '-'));
-    drawLine('الفرع', entry.branchName || entry.branch || '-');
+    drawLine('الفرع', resolveBranchDisplayName(entry, branches, players, subscriptions) || '-');
     drawLine('الجهة/الاسم', entry.relatedTo || '-');
     drawLine('المبلغ', `${Number(entry.amount || 0).toLocaleString()} ج.م`);
     drawLine('الوصف', entry.description || '-');
@@ -884,7 +1077,7 @@ export default function Finance() {
                       <div className="flex items-center justify-between bg-slate-50 p-2 rounded-lg">
                         <span className="text-slate-500">الفئة والفرع:</span>
                         <span className="font-medium text-slate-800">
-                          {entry.category} {entry.branch ? `• ${entry.branch}` : ''}
+                          {entry.category} {resolveBranchDisplayName(entry, branches, players, subscriptions) ? `• ${resolveBranchDisplayName(entry, branches, players, subscriptions)}` : ''}
                         </span>
                       </div>
 
@@ -953,6 +1146,7 @@ export default function Finance() {
               <tbody className="divide-y divide-slate-100 bg-white">
                 {paginatedFinances.map((entry) => {
                   const isIncome = entry.type === 'income';
+                  const branchName = resolveBranchDisplayName(entry, branches, players, subscriptions);
 
                   return (
                     <tr key={entry.id || `${entry.date}_${entry.amount}`} className="hover:bg-slate-50/70 transition">
@@ -969,7 +1163,15 @@ export default function Finance() {
                         </span>
                       </td>
                       <td className="px-4 py-3 font-medium text-slate-800">{entry.category}</td>
-                      <td className="px-4 py-3 text-slate-600">{entry.branchName || entry.branch || '-'}</td>
+                      <td className="px-4 py-3 font-medium">
+                        {branchName ? (
+                          <span className="inline-flex items-center gap-1 rounded-lg border border-sky-200 bg-sky-50 px-2 py-0.5 text-xs font-bold text-sky-800">
+                            {branchName}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 text-xs">-</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 font-bold text-slate-900">{entry.relatedTo || '-'}</td>
                       <td className={`px-4 py-3 font-bold ${isIncome ? 'text-emerald-600' : 'text-rose-600'}`}>
                         {Number(entry.amount).toLocaleString()} ج
@@ -1100,7 +1302,7 @@ export default function Finance() {
                 <select
                   value={formData.branch}
                   onChange={handleFormChange('branch')}
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-700 outline-none"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-700 outline-none focus:border-sky-500 focus:bg-white"
                 >
                   <option value="">-- اختر الفرع --</option>
                   {branches.map((b) => (
@@ -1108,6 +1310,9 @@ export default function Finance() {
                       {b.name}
                     </option>
                   ))}
+                  {formData.branch && !branches.some((b) => b.name === formData.branch) && (
+                    <option value={formData.branch}>{formData.branch}</option>
+                  )}
                 </select>
               </div>
 
@@ -1116,7 +1321,23 @@ export default function Finance() {
                 <input
                   value={formData.relatedTo}
                   placeholder="اسم الشخص أو المورد..."
-                  onChange={handleFormChange('relatedTo')}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setFormData((prev) => {
+                      const updated = { ...prev, relatedTo: val };
+                      if (!prev.branch && val) {
+                        const clean = val.trim().toLowerCase();
+                        const pMatch = players.find((p) => p.name && p.name.trim().toLowerCase() === clean);
+                        if (pMatch?.branch) {
+                          updated.branch = pMatch.branch;
+                        } else {
+                          const sMatch = subscriptions.find((s) => s.player && s.player.trim().toLowerCase() === clean);
+                          if (sMatch?.branch) updated.branch = sMatch.branch;
+                        }
+                      }
+                      return updated;
+                    });
+                  }}
                   className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
                 />
               </div>

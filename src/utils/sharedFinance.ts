@@ -5,6 +5,7 @@ export type FinanceEntryRecord = {
   type: FinanceType;
   category: string;
   branch?: string;
+  branchId?: string;
   branchName?: string;
   relatedTo?: string;
   amount: number;
@@ -14,11 +15,25 @@ export type FinanceEntryRecord = {
   userRole?: string;
 };
 
+function normalizeArabicStr(str: string = ''): string {
+  if (!str) return '';
+  return str
+    .trim()
+    .toLowerCase()
+    .replace(/^فرع\s+/, '')
+    .replace(/[أإآ]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/ى/g, 'ي')
+    .replace(/\s+/g, ' ');
+}
+
 export function recordFinanceTransaction(entry: {
   type: FinanceType;
   amount: number;
   category: string;
   branch?: string;
+  branchId?: string;
+  branchName?: string;
   description?: string;
   date?: string;
   relatedTo?: string;
@@ -34,14 +49,47 @@ export function recordFinanceTransaction(entry: {
     }
   } catch {}
 
+  // Resolve branch name and branch id from localStorage branches
+  let finalBranchName = entry.branchName || entry.branch || '';
+  let finalBranchId = entry.branchId || '';
+
+  try {
+    const rawBranches = window.localStorage.getItem('branches');
+    if (rawBranches) {
+      const branches = JSON.parse(rawBranches);
+      if (Array.isArray(branches) && branches.length > 0) {
+        // If entry has an ID that matches
+        const byId = branches.find((b: any) => b.id && (b.id === entry.branchId || b.id === entry.branch));
+        if (byId) {
+          finalBranchId = byId.id;
+          finalBranchName = byId.name || finalBranchName;
+        } else if (finalBranchName) {
+          // Find by name
+          const normInput = normalizeArabicStr(finalBranchName);
+          const byName = branches.find((b: any) => {
+            if (!b.name) return false;
+            if (b.name.trim().toLowerCase() === finalBranchName.trim().toLowerCase()) return true;
+            const bNorm = normalizeArabicStr(b.name);
+            return bNorm === normInput || bNorm.includes(normInput) || normInput.includes(bNorm);
+          });
+          if (byName) {
+            finalBranchId = byName.id || '';
+            finalBranchName = byName.name || finalBranchName;
+          }
+        }
+      }
+    }
+  } catch {}
+
   const dateStr = entry.date || new Date().toISOString().split('T')[0];
   const newRecord: FinanceEntryRecord = {
     id: `fin_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     type: entry.type,
     category: entry.category,
-    branch: entry.branch || 'الفرع الرئيسي',
-    branchName: entry.branch || 'الفرع الرئيسي',
-    relatedTo: entry.relatedTo || entry.branch || '',
+    branch: finalBranchName,
+    branchName: finalBranchName,
+    branchId: finalBranchId,
+    relatedTo: entry.relatedTo || finalBranchName || '',
     amount: Number(entry.amount) || 0,
     date: dateStr,
     description: entry.description || '',
@@ -65,9 +113,13 @@ export function recordFinanceTransaction(entry: {
     const apiPayload = {
       type: newRecord.type,
       category: newRecord.category,
-      branch: newRecord.branch,
-      branch_name: newRecord.branchName,
+      branch: finalBranchName,
+      branch_name: finalBranchName,
+      branchName: finalBranchName,
+      branch_id: finalBranchId || null,
+      branchId: finalBranchId || null,
       related_to: newRecord.relatedTo,
+      relatedTo: newRecord.relatedTo,
       amount: newRecord.amount,
       date: newRecord.date,
       description: newRecord.description,

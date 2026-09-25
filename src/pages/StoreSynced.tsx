@@ -44,6 +44,7 @@ type SaleForm = {
 
 type EditProductForm = {
   id: string;
+  branch: string;
   name: string;
   costPrice: string;
   sellPrice: string;
@@ -85,6 +86,7 @@ function readStoredData<T>(key: string, fallback: T): T {
 function formatMoney(value: number) {
   return `${value.toLocaleString('en-US')} ج.م`;
 }
+
 function createStableId(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -147,15 +149,29 @@ export default function StoreSynced() {
     setToast({ message, type });
   };
 
+  const getBranchDetails = (branchNameOrId: string) => {
+    const clean = (branchNameOrId || '').trim().toLowerCase();
+    const match = branches.find(
+      (b) =>
+        (b.id && b.id.toLowerCase() === clean) ||
+        (b.name && b.name.trim().toLowerCase() === clean)
+    );
+    return {
+      branchName: match?.name || branchNameOrId || 'الفرع الرئيسي',
+      branchId: match?.id || '',
+    };
+  };
+
   const addNewProduct = () => {
-    const branch = productForm.branch.trim();
+    const branchInput = productForm.branch.trim() || (branches[0]?.name || 'الفرع الرئيسي');
+    const { branchName, branchId } = getBranchDetails(branchInput);
     const name = productForm.name.trim();
     const cost = Number(productForm.costPrice);
     const sell = Number(productForm.sellPrice);
     const qty = Number(productForm.qty);
     const minStock = Number(productForm.minStock) || 5;
 
-    if (!branch || !name || Number.isNaN(cost) || Number.isNaN(sell) || Number.isNaN(qty)) {
+    if (!branchName || !name || Number.isNaN(cost) || Number.isNaN(sell) || Number.isNaN(qty)) {
       showToast('يرجى إكمال كافة البيانات الموضحة', 'error');
       return;
     }
@@ -165,7 +181,7 @@ export default function StoreSynced() {
       ...products,
       {
         id: createStableId('product'),
-        branch,
+        branch: branchName,
         name,
         cost,
         sell,
@@ -181,8 +197,11 @@ export default function StoreSynced() {
       type: 'expense',
       amount: totalCost,
       category: 'مشتريات متجر',
-      branch,
-      description: `شراء ${qty} من ${name}`,
+      branch: branchName,
+      branchId,
+      branchName,
+      relatedTo: `${name} (${branchName})`,
+      description: `شراء ${qty} من ${name} - فرع: ${branchName}`,
       date: new Date().toISOString().split('T')[0],
     });
 
@@ -191,12 +210,13 @@ export default function StoreSynced() {
   };
 
   const sellProduct = () => {
-    const branch = saleForm.branch.trim();
     const productId = saleForm.productId;
-    const qtyToSell = Number(saleForm.qty);
     const product = products.find((item) => item.id === productId);
+    const rawBranch = (saleForm.branch || product?.branch || branches[0]?.name || 'الفرع الرئيسي').trim();
+    const { branchName, branchId } = getBranchDetails(rawBranch);
+    const qtyToSell = Number(saleForm.qty);
 
-    if (!branch || !productId || Number.isNaN(qtyToSell) || qtyToSell <= 0 || !product) {
+    if (!productId || Number.isNaN(qtyToSell) || qtyToSell <= 0 || !product) {
       showToast('اختر المنتج والكمية بشكل صحيح', 'error');
       return;
     }
@@ -214,7 +234,7 @@ export default function StoreSynced() {
     const nextSales = [
       ...sales,
       {
-        branch,
+        branch: branchName,
         name: product.name,
         cost: product.cost,
         sell: product.sell,
@@ -231,13 +251,16 @@ export default function StoreSynced() {
       type: 'income',
       amount: revenue,
       category: 'مبيعات متجر',
-      branch,
-      description: `بيع ${qtyToSell} من ${product.name}`,
+      branch: branchName,
+      branchId,
+      branchName,
+      relatedTo: `${product.name} (${branchName})`,
+      description: `بيع ${qtyToSell} من ${product.name} - فرع: ${branchName}`,
       date: today,
     });
 
     setSaleForm(initialSaleForm);
-    showToast(`تم البيع وتسجيل الإيراد (${revenue} ج.م) بالماليات بنجاح`, 'success');
+    showToast(`تم البيع وتسجيل الإيراد (${revenue} ج.م) بفرع ${branchName} بالماليات بنجاح`, 'success');
   };
 
   const deleteProduct = (id: string) => {
@@ -250,6 +273,7 @@ export default function StoreSynced() {
   const openEditProductModal = (product: Product) => {
     setEditProductForm({
       id: product.id,
+      branch: product.branch || '',
       name: product.name,
       costPrice: String(product.cost),
       sellPrice: String(product.sell),
@@ -258,61 +282,71 @@ export default function StoreSynced() {
     });
   };
 
-    const saveEditedProduct = () => {
-      if (!editProductForm) return;
-      const oldProduct = products.find((product) => product.id === editProductForm.id);
-      const newQty = Number(editProductForm.qty);
-      const costPrice = Number(editProductForm.costPrice);
-      const addedQty = newQty - (oldProduct?.qty || 0);
+  const saveEditedProduct = () => {
+    if (!editProductForm) return;
+    const oldProduct = products.find((product) => product.id === editProductForm.id);
+    const newQty = Number(editProductForm.qty);
+    const costPrice = Number(editProductForm.costPrice);
+    const addedQty = newQty - (oldProduct?.qty || 0);
+    const targetBranch = editProductForm.branch || oldProduct?.branch || '';
+    const { branchName, branchId } = getBranchDetails(targetBranch);
 
-      const nextProducts = products.map((product) =>
-        product.id === editProductForm.id
-          ? {
-              ...product,
-              name: editProductForm.name,
-              cost: costPrice,
-              sell: Number(editProductForm.sellPrice),
-              qty: newQty,
-              minStock: Number(editProductForm.minStock),
-            }
-          : product,
-      );
-      persistStoreData(nextProducts, sales);
+    const nextProducts = products.map((product) =>
+      product.id === editProductForm.id
+        ? {
+            ...product,
+            branch: branchName,
+            name: editProductForm.name,
+            cost: costPrice,
+            sell: Number(editProductForm.sellPrice),
+            qty: newQty,
+            minStock: Number(editProductForm.minStock),
+          }
+        : product,
+    );
+    persistStoreData(nextProducts, sales);
 
-      if (addedQty > 0 && costPrice > 0) {
-        recordFinanceTransaction({
-          type: 'expense',
-          amount: addedQty * costPrice,
-          category: 'مشتريات متجر',
-          branch: oldProduct?.branch || '',
-          description: `شراء كمية إضافية (${addedQty}) من ${editProductForm.name}`,
-        });
-      }
-
-      setEditProductForm(null);
-      showToast('تم تعديل المنتج وتسجيل تكلفة الزيادة بالماليات', 'success');
-    };
-
-    const deleteSale = (index: number) => {
-      if (!window.confirm('هل أنت متأكد من حذف عملية البيع؟ سيتم استرجاع الكمية للمخزون.')) return;
-      const sale = sales[index];
-      const nextProducts = products.map((product) =>
-        product.id === sale.productId ? { ...product, qty: Number(product.qty) + Number(sale.qty) } : product,
-      );
-      const nextSales = sales.filter((_, itemIndex) => itemIndex !== index);
-      persistStoreData(nextProducts, nextSales);
-
+    if (addedQty > 0 && costPrice > 0) {
       recordFinanceTransaction({
         type: 'expense',
-        amount: Number(sale.sell) * Number(sale.qty),
-        category: 'استرجاع بيع',
-        branch: sale.branch,
-        description: `إلغاء بيع ${sale.qty} من ${sale.name}`,
-        date: new Date().toISOString().split('T')[0],
+        amount: addedQty * costPrice,
+        category: 'مشتريات متجر',
+        branch: branchName,
+        branchId,
+        branchName,
+        relatedTo: `${editProductForm.name} (${branchName})`,
+        description: `شراء كمية إضافية (${addedQty}) من ${editProductForm.name} - فرع: ${branchName}`,
       });
+    }
 
-      showToast('تم حذف عملية البيع واسترجاع الكمية وتسجيل الاسترجاع بالماليات', 'success');
-    };
+    setEditProductForm(null);
+    showToast('تم تعديل المنتج وتسجيل تكلفة الزيادة بالماليات', 'success');
+  };
+
+  const deleteSale = (index: number) => {
+    if (!window.confirm('هل أنت متأكد من حذف عملية البيع؟ سيتم استرجاع الكمية للمخزون.')) return;
+    const sale = sales[index];
+    const { branchName, branchId } = getBranchDetails(sale.branch);
+    const nextProducts = products.map((product) =>
+      product.id === sale.productId ? { ...product, qty: Number(product.qty) + Number(sale.qty) } : product,
+    );
+    const nextSales = sales.filter((_, itemIndex) => itemIndex !== index);
+    persistStoreData(nextProducts, nextSales);
+
+    recordFinanceTransaction({
+      type: 'expense',
+      amount: Number(sale.sell) * Number(sale.qty),
+      category: 'استرجاع بيع',
+      branch: branchName,
+      branchId,
+      branchName,
+      relatedTo: `${sale.name} (${branchName})`,
+      description: `إلغاء بيع ${sale.qty} من ${sale.name} - فرع: ${branchName}`,
+      date: new Date().toISOString().split('T')[0],
+    });
+
+    showToast('تم حذف عملية البيع واسترجاع الكمية وتسجيل الاسترجاع بالماليات', 'success');
+  };
 
   const openEditSaleModal = (index: number) => {
     const sale = sales[index];
@@ -331,6 +365,7 @@ export default function StoreSynced() {
     }
 
     const sale = sales[editingSaleIndex];
+    const { branchName, branchId } = getBranchDetails(sale.branch);
     const oldRevenue = Number(sale.sell) * Number(sale.qty);
     const newRevenue = newPrice * newQty;
     const diff = newRevenue - oldRevenue;
@@ -350,6 +385,7 @@ export default function StoreSynced() {
       index === editingSaleIndex
         ? {
             ...item,
+            branch: branchName,
             qty: newQty,
             sell: newPrice,
             profit: (newPrice - Number(item.cost)) * newQty,
@@ -364,16 +400,22 @@ export default function StoreSynced() {
         type: 'income',
         amount: diff,
         category: 'مبيعات متجر',
-        branch: sale.branch,
-        description: `تعديل بيع (مبلغ إضافي): ${sale.name}`,
+        branch: branchName,
+        branchId,
+        branchName,
+        relatedTo: `${sale.name} (${branchName})`,
+        description: `تعديل بيع (مبلغ إضافي): ${sale.name} - فرع: ${branchName}`,
       });
     } else if (diff < 0) {
       recordFinanceTransaction({
         type: 'expense',
         amount: Math.abs(diff),
         category: 'استرجاع بيع',
-        branch: sale.branch,
-        description: `تعديل بيع (خصم مبلغ): ${sale.name}`,
+        branch: branchName,
+        branchId,
+        branchName,
+        relatedTo: `${sale.name} (${branchName})`,
+        description: `تعديل بيع (خصم مبلغ): ${sale.name} - فرع: ${branchName}`,
       });
     }
 
@@ -394,7 +436,7 @@ export default function StoreSynced() {
           <div>
             <p className="text-sm text-slate-500">المتجر</p>
             <h1 className="text-3xl font-semibold text-slate-900">متجر الأكاديمية</h1>
-            <p className="mt-2 text-sm text-slate-600">إدارة المخزون والمبيعات ومزامنة كل حركة مع النظام المالي في نفس الواجهة.</p>
+            <p className="mt-2 text-sm text-slate-600">إدارة المخزون والمبيعات ومزامنة كل حركة مع النظام المالي والفرع مباشرة في نفس الواجهة.</p>
           </div>
         </div>
       </div>
@@ -402,10 +444,10 @@ export default function StoreSynced() {
       <div className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm lg:grid-cols-[1.4fr_0.8fr]">
         <div>
           <div className="mb-3 inline-flex rounded-full bg-emerald-100 px-3 py-1 text-sm font-medium text-emerald-700">
-            مخزون ومبيعات متزامنة
+            مخزون ومبيعات متزامنة مع الفروع والمالية
           </div>
           <h2 className="text-2xl font-semibold text-slate-900">المتجر بشكل أوضح وأسهل للإدارة اليومية</h2>
-          <p className="mt-2 text-sm text-slate-600">أضف المنتجات، نفذ عمليات البيع، وتابع صافي الربح مع مزامنة الشراء والبيع مباشرة مع الحسابات المالية.</p>
+          <p className="mt-2 text-sm text-slate-600">أضف المنتجات، نفذ عمليات البيع، وتابع صافي الربح مع مزامنة الشراء والبيع والفرع مباشرة مع الحسابات المالية.</p>
         </div>
         <div className="grid gap-3 sm:grid-cols-3">
           <div className="rounded-2xl bg-slate-50 p-4">
@@ -430,19 +472,54 @@ export default function StoreSynced() {
             <span className="rounded-full bg-emerald-100 px-3 py-1 text-sm font-medium text-emerald-700">مزامنة مشتريات</span>
           </div>
           <div className="grid gap-4 md:grid-cols-2">
-            <select value={productForm.branch} onChange={(event) => setProductForm((prev) => ({ ...prev, branch: event.target.value }))} className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-right outline-none">
+            <select
+              value={productForm.branch}
+              onChange={(event) => setProductForm((prev) => ({ ...prev, branch: event.target.value }))}
+              className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-right outline-none focus:border-sky-500"
+            >
               <option value="">اختر الفرع</option>
               {branches.map((branch) => (
                 <option key={branch.id || branch.name} value={branch.name || ''}>{branch.name}</option>
               ))}
             </select>
-            <input value={productForm.name} onChange={(event) => setProductForm((prev) => ({ ...prev, name: event.target.value }))} className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-right outline-none" placeholder="اسم المنتج" />
-            <input type="number" value={productForm.costPrice} onChange={(event) => setProductForm((prev) => ({ ...prev, costPrice: event.target.value }))} className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-right outline-none" placeholder="سعر الجملة" />
-            <input type="number" value={productForm.sellPrice} onChange={(event) => setProductForm((prev) => ({ ...prev, sellPrice: event.target.value }))} className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-right outline-none" placeholder="سعر البيع" />
-            <input type="number" value={productForm.qty} onChange={(event) => setProductForm((prev) => ({ ...prev, qty: event.target.value }))} className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-right outline-none" placeholder="الكمية" />
-            <input type="number" value={productForm.minStock} onChange={(event) => setProductForm((prev) => ({ ...prev, minStock: event.target.value }))} className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-right outline-none" placeholder="الحد الأدنى" />
+            <input
+              value={productForm.name}
+              onChange={(event) => setProductForm((prev) => ({ ...prev, name: event.target.value }))}
+              className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-right outline-none focus:border-sky-500"
+              placeholder="اسم المنتج"
+            />
+            <input
+              type="number"
+              value={productForm.costPrice}
+              onChange={(event) => setProductForm((prev) => ({ ...prev, costPrice: event.target.value }))}
+              className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-right outline-none focus:border-sky-500"
+              placeholder="سعر الجملة"
+            />
+            <input
+              type="number"
+              value={productForm.sellPrice}
+              onChange={(event) => setProductForm((prev) => ({ ...prev, sellPrice: event.target.value }))}
+              className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-right outline-none focus:border-sky-500"
+              placeholder="سعر البيع"
+            />
+            <input
+              type="number"
+              value={productForm.qty}
+              onChange={(event) => setProductForm((prev) => ({ ...prev, qty: event.target.value }))}
+              className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-right outline-none focus:border-sky-500"
+              placeholder="الكمية"
+            />
+            <input
+              type="number"
+              value={productForm.minStock}
+              onChange={(event) => setProductForm((prev) => ({ ...prev, minStock: event.target.value }))}
+              className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-right outline-none focus:border-sky-500"
+              placeholder="الحد الأدنى"
+            />
           </div>
-          <button type="button" onClick={addNewProduct} className="mt-4 rounded-2xl bg-sky-600 px-4 py-2 text-sm font-medium text-white">إضافة للمخزون</button>
+          <button type="button" onClick={addNewProduct} className="mt-4 rounded-2xl bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-700">
+            إضافة للمخزون
+          </button>
         </div>
 
         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -451,21 +528,47 @@ export default function StoreSynced() {
             <span className="rounded-full bg-sky-100 px-3 py-1 text-sm font-medium text-sky-700">مزامنة مبيعات</span>
           </div>
           <div className="grid gap-4">
-            <select value={saleForm.branch} onChange={(event) => setSaleForm((prev) => ({ ...prev, branch: event.target.value, productId: '' }))} className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-right outline-none">
-              <option value="">اختر الفرع</option>
+            <select
+              value={saleForm.branch}
+              onChange={(event) => setSaleForm((prev) => ({ ...prev, branch: event.target.value, productId: '' }))}
+              className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-right outline-none focus:border-sky-500"
+            >
+              <option value="">كل الفروع / اختر الفرع</option>
               {branches.map((branch) => (
                 <option key={branch.id || branch.name} value={branch.name || ''}>{branch.name}</option>
               ))}
             </select>
-            <select value={saleForm.productId} onChange={(event) => setSaleForm((prev) => ({ ...prev, productId: event.target.value }))} className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-right outline-none">
+            <select
+              value={saleForm.productId}
+              onChange={(event) => {
+                const pId = event.target.value;
+                const selectedProd = products.find((p) => p.id === pId);
+                setSaleForm((prev) => ({
+                  ...prev,
+                  productId: pId,
+                  branch: prev.branch || selectedProd?.branch || '',
+                }));
+              }}
+              className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-right outline-none focus:border-sky-500"
+            >
               <option value="">اختر المنتج</option>
               {availableProducts.map((product) => (
-                <option key={product.id} value={product.id}>{product.name} (المتوفر: {product.qty})</option>
+                <option key={product.id} value={product.id}>
+                  {product.name} {product.branch ? `(${product.branch})` : ''} - (المتوفر: {product.qty})
+                </option>
               ))}
             </select>
-            <input type="number" value={saleForm.qty} onChange={(event) => setSaleForm((prev) => ({ ...prev, qty: event.target.value }))} className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-right outline-none" placeholder="الكمية المراد بيعها" />
+            <input
+              type="number"
+              value={saleForm.qty}
+              onChange={(event) => setSaleForm((prev) => ({ ...prev, qty: event.target.value }))}
+              className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-right outline-none focus:border-sky-500"
+              placeholder="الكمية المراد بيعها"
+            />
           </div>
-          <button type="button" onClick={sellProduct} className="mt-4 rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white">بيع المنتج</button>
+          <button type="button" onClick={sellProduct} className="mt-4 rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-700">
+            بيع المنتج
+          </button>
         </div>
       </div>
 
@@ -490,16 +593,20 @@ export default function StoreSynced() {
               {filteredProducts.length ? (
                 filteredProducts.map((product) => (
                   <tr key={product.id} className="border-t border-slate-100 text-sm text-slate-700">
-                    <td className="px-4 py-3">{product.branch}</td>
-                    <td className="px-4 py-3">{product.name}</td>
-                    <td className="px-4 py-3">{product.cost}</td>
-                    <td className="px-4 py-3">{product.sell}</td>
+                    <td className="px-4 py-3">
+                      <span className="inline-flex rounded-lg bg-sky-50 px-2 py-0.5 text-xs font-bold text-sky-800 border border-sky-100">
+                        {product.branch || 'الفرع الرئيسي'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 font-semibold text-slate-900">{product.name}</td>
+                    <td className="px-4 py-3">{product.cost} ج</td>
+                    <td className="px-4 py-3 font-bold text-emerald-600">{product.sell} ج</td>
                     <td className={`px-4 py-3 ${product.qty <= product.minStock ? 'font-semibold text-rose-600' : ''}`}>{product.qty}</td>
                     <td className="px-4 py-3">{product.minStock}</td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-2">
-                        <button type="button" onClick={() => openEditProductModal(product)} className="rounded-xl border border-slate-300 px-3 py-1.5 text-sm">تعديل</button>
-                        <button type="button" onClick={() => deleteProduct(product.id)} className="rounded-xl border border-rose-300 px-3 py-1.5 text-sm text-rose-600">حذف</button>
+                        <button type="button" onClick={() => openEditProductModal(product)} className="rounded-xl border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50">تعديل</button>
+                        <button type="button" onClick={() => deleteProduct(product.id)} className="rounded-xl border border-rose-300 px-3 py-1.5 text-sm text-rose-600 hover:bg-rose-50">حذف</button>
                       </div>
                     </td>
                   </tr>
@@ -539,17 +646,21 @@ export default function StoreSynced() {
               {sales.length ? (
                 sales.map((sale, index) => (
                   <tr key={`${sale.productId || sale.name}-${index}`} className="border-t border-slate-100 text-sm text-slate-700">
-                    <td className="px-4 py-3">{sale.branch}</td>
-                    <td className="px-4 py-3">{sale.name}</td>
-                    <td className="px-4 py-3">{sale.cost}</td>
-                    <td className="px-4 py-3">{sale.sell}</td>
+                    <td className="px-4 py-3">
+                      <span className="inline-flex rounded-lg bg-sky-50 px-2 py-0.5 text-xs font-bold text-sky-800 border border-sky-100">
+                        {sale.branch || 'الفرع الرئيسي'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 font-semibold text-slate-900">{sale.name}</td>
+                    <td className="px-4 py-3">{sale.cost} ج</td>
+                    <td className="px-4 py-3 font-bold text-emerald-600">{sale.sell} ج</td>
                     <td className="px-4 py-3">{sale.qty}</td>
-                    <td className="px-4 py-3">{sale.profit}</td>
-                    <td className="px-4 py-3">{sale.date}</td>
+                    <td className="px-4 py-3 font-bold text-sky-700">{sale.profit} ج</td>
+                    <td className="px-4 py-3 font-mono text-xs text-slate-500">{sale.date}</td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-2">
-                        <button type="button" onClick={() => openEditSaleModal(index)} className="rounded-xl border border-slate-300 px-3 py-1.5 text-sm">تعديل</button>
-                        <button type="button" onClick={() => deleteSale(index)} className="rounded-xl border border-rose-300 px-3 py-1.5 text-sm text-rose-600">حذف</button>
+                        <button type="button" onClick={() => openEditSaleModal(index)} className="rounded-xl border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50">تعديل</button>
+                        <button type="button" onClick={() => deleteSale(index)} className="rounded-xl border border-rose-300 px-3 py-1.5 text-sm text-rose-600 hover:bg-rose-50">حذف</button>
                       </div>
                     </td>
                   </tr>
@@ -573,18 +684,28 @@ export default function StoreSynced() {
           <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl">
             <div className="mb-4 flex items-center justify-between">
               <h3 className="text-xl font-semibold text-slate-900">تعديل منتج</h3>
-              <button type="button" onClick={() => setEditProductForm(null)} className="text-slate-500">✕</button>
+              <button type="button" onClick={() => setEditProductForm(null)} className="text-slate-500 hover:text-slate-700">✕</button>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
-              <input value={editProductForm.name} onChange={(event) => setEditProductForm((prev) => prev ? { ...prev, name: event.target.value } : prev)} className="rounded-2xl border border-slate-200 px-3 py-2 outline-none" placeholder="اسم المنتج" />
-              <input type="number" value={editProductForm.costPrice} onChange={(event) => setEditProductForm((prev) => prev ? { ...prev, costPrice: event.target.value } : prev)} className="rounded-2xl border border-slate-200 px-3 py-2 outline-none" placeholder="سعر الجملة" />
-              <input type="number" value={editProductForm.sellPrice} onChange={(event) => setEditProductForm((prev) => prev ? { ...prev, sellPrice: event.target.value } : prev)} className="rounded-2xl border border-slate-200 px-3 py-2 outline-none" placeholder="سعر البيع" />
-              <input type="number" value={editProductForm.qty} onChange={(event) => setEditProductForm((prev) => prev ? { ...prev, qty: event.target.value } : prev)} className="rounded-2xl border border-slate-200 px-3 py-2 outline-none" placeholder="الكمية الحالية" />
-              <input type="number" value={editProductForm.minStock} onChange={(event) => setEditProductForm((prev) => prev ? { ...prev, minStock: event.target.value } : prev)} className="rounded-2xl border border-slate-200 px-3 py-2 outline-none" placeholder="الحد الأدنى" />
+              <select
+                value={editProductForm.branch}
+                onChange={(event) => setEditProductForm((prev) => prev ? { ...prev, branch: event.target.value } : prev)}
+                className="rounded-2xl border border-slate-200 px-3 py-2 outline-none focus:border-sky-500 md:col-span-2 text-right"
+              >
+                <option value="">اختر الفرع</option>
+                {branches.map((b) => (
+                  <option key={b.id || b.name} value={b.name || ''}>{b.name}</option>
+                ))}
+              </select>
+              <input value={editProductForm.name} onChange={(event) => setEditProductForm((prev) => prev ? { ...prev, name: event.target.value } : prev)} className="rounded-2xl border border-slate-200 px-3 py-2 outline-none focus:border-sky-500" placeholder="اسم المنتج" />
+              <input type="number" value={editProductForm.costPrice} onChange={(event) => setEditProductForm((prev) => prev ? { ...prev, costPrice: event.target.value } : prev)} className="rounded-2xl border border-slate-200 px-3 py-2 outline-none focus:border-sky-500" placeholder="سعر الجملة" />
+              <input type="number" value={editProductForm.sellPrice} onChange={(event) => setEditProductForm((prev) => prev ? { ...prev, sellPrice: event.target.value } : prev)} className="rounded-2xl border border-slate-200 px-3 py-2 outline-none focus:border-sky-500" placeholder="سعر البيع" />
+              <input type="number" value={editProductForm.qty} onChange={(event) => setEditProductForm((prev) => prev ? { ...prev, qty: event.target.value } : prev)} className="rounded-2xl border border-slate-200 px-3 py-2 outline-none focus:border-sky-500" placeholder="الكمية الحالية" />
+              <input type="number" value={editProductForm.minStock} onChange={(event) => setEditProductForm((prev) => prev ? { ...prev, minStock: event.target.value } : prev)} className="rounded-2xl border border-slate-200 px-3 py-2 outline-none focus:border-sky-500" placeholder="الحد الأدنى" />
             </div>
             <div className="mt-6 flex justify-end gap-3">
               <button type="button" onClick={() => setEditProductForm(null)} className="rounded-2xl border border-slate-300 px-4 py-2 text-sm text-slate-700">إلغاء</button>
-              <button type="button" onClick={saveEditedProduct} className="rounded-2xl bg-sky-600 px-4 py-2 text-sm font-medium text-white">حفظ التعديلات</button>
+              <button type="button" onClick={saveEditedProduct} className="rounded-2xl bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-700">حفظ التعديلات</button>
             </div>
           </div>
         </div>
@@ -595,21 +716,21 @@ export default function StoreSynced() {
           <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
             <div className="mb-4 flex items-center justify-between">
               <h3 className="text-xl font-semibold text-slate-900">تعديل عملية بيع</h3>
-              <button type="button" onClick={() => { setEditingSaleIndex(null); setEditSaleForm(null); }} className="text-slate-500">✕</button>
+              <button type="button" onClick={() => { setEditingSaleIndex(null); setEditSaleForm(null); }} className="text-slate-500 hover:text-slate-700">✕</button>
             </div>
             <div className="space-y-4">
               <label className="block text-sm text-slate-700">
                 الكمية المباعة
-                <input type="number" value={editSaleForm.qty} onChange={(event) => setEditSaleForm((prev) => prev ? { ...prev, qty: event.target.value } : prev)} className="mt-2 w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none" />
+                <input type="number" value={editSaleForm.qty} onChange={(event) => setEditSaleForm((prev) => prev ? { ...prev, qty: event.target.value } : prev)} className="mt-2 w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none focus:border-sky-500" />
               </label>
               <label className="block text-sm text-slate-700">
                 سعر البيع (للقطعة)
-                <input type="number" value={editSaleForm.price} onChange={(event) => setEditSaleForm((prev) => prev ? { ...prev, price: event.target.value } : prev)} className="mt-2 w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none" />
+                <input type="number" value={editSaleForm.price} onChange={(event) => setEditSaleForm((prev) => prev ? { ...prev, price: event.target.value } : prev)} className="mt-2 w-full rounded-2xl border border-slate-200 px-3 py-2 outline-none focus:border-sky-500" />
               </label>
             </div>
             <div className="mt-6 flex justify-end gap-3">
               <button type="button" onClick={() => { setEditingSaleIndex(null); setEditSaleForm(null); }} className="rounded-2xl border border-slate-300 px-4 py-2 text-sm text-slate-700">إلغاء</button>
-              <button type="button" onClick={saveEditedSale} className="rounded-2xl bg-sky-600 px-4 py-2 text-sm font-medium text-white">حفظ</button>
+              <button type="button" onClick={saveEditedSale} className="rounded-2xl bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-700">حفظ</button>
             </div>
           </div>
         </div>

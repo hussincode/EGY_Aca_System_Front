@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, SearchSm, Phone01, Trash01, User01 } from '@untitledui/icons';
+import { Plus, SearchSm, Phone01, Trash01, User01, CreditCard01, Calendar } from '@untitledui/icons';
 import AppIcon from '@/components/AppIcon';
 import Pagination from '@/components/Pagination';
 import { useAuth } from '@/contexts/AuthContext';
+import { recordFinanceTransaction } from '@/utils/sharedFinance';
 
 export type StaffPayType = 'hour' | 'fixed' | 'percent';
 
@@ -12,30 +13,44 @@ export type StaffMember = {
   name: string;
   phone?: string;
   role: string;
+  branch?: string;
+  branchId?: string;
   payType: StaffPayType;
   rate: number;
   hours: number;
   revenue: number;
+  advance: number; // السلف / الاستلاف
+};
+
+type Branch = {
+  id?: string;
+  name?: string;
 };
 
 type StaffFormState = {
   name: string;
   phone: string;
   role: string;
+  branch: string;
   payType: StaffPayType;
   rate: number;
   hours: number;
   revenue: number;
+  advance: number;
+  recordToFinance: boolean;
 };
 
 const initialFormState: StaffFormState = {
   name: '',
   phone: '',
   role: '',
+  branch: '',
   payType: 'hour',
   rate: 0,
   hours: 0,
   revenue: 0,
+  advance: 0,
+  recordToFinance: false,
 };
 
 function readStoredData<T>(key: string, fallback: T): T {
@@ -57,7 +72,7 @@ function formatStaffSerial(sequence: number) {
   return `STF-${String(sequence).padStart(5, '0')}`;
 }
 
-function normalizeStaffMember(item: any, fallbackIndex = 1): StaffMember {
+function normalizeStaffMember(item: any, fallbackIndex = 1, branchesList: Branch[] = []): StaffMember {
   if (!item || typeof item !== 'object') {
     return {
       id: `${Date.now()}-${Math.random()}`,
@@ -65,10 +80,13 @@ function normalizeStaffMember(item: any, fallbackIndex = 1): StaffMember {
       name: '',
       phone: '',
       role: '',
+      branch: '',
+      branchId: '',
       payType: 'hour',
       rate: 0,
       hours: 0,
       revenue: 0,
+      advance: 0,
     };
   }
 
@@ -78,6 +96,14 @@ function normalizeStaffMember(item: any, fallbackIndex = 1): StaffMember {
   const name = String(item.name || '').trim();
   const phone = item.phone != null ? String(item.phone).trim() : '';
   const role = String(item.role || '').trim();
+  const bId = String(item.branch_id || item.branchId || '');
+  const bNameRaw = String(item.branch || item.branch_name || item.branchName || '').trim();
+
+  let finalBranch = bNameRaw;
+  if (!finalBranch && bId && branchesList.length) {
+    const match = branchesList.find((b) => b.id && b.id.toLowerCase() === bId.toLowerCase());
+    if (match?.name) finalBranch = match.name;
+  }
 
   let payType: StaffPayType = 'hour';
   const rawPayType = String(item.payType || item.pay_type || '').toLowerCase();
@@ -88,6 +114,7 @@ function normalizeStaffMember(item: any, fallbackIndex = 1): StaffMember {
   const rate = Number(item.rate) || 0;
   const hours = Number(item.hours) || 0;
   const revenue = Number(item.revenue) || 0;
+  const advance = Number(item.advance) || 0;
 
   return {
     id,
@@ -95,10 +122,13 @@ function normalizeStaffMember(item: any, fallbackIndex = 1): StaffMember {
     name,
     phone,
     role,
+    branch: finalBranch,
+    branchId: bId,
     payType,
     rate,
     hours,
     revenue,
+    advance,
   };
 }
 
@@ -136,10 +166,12 @@ export default function Staff() {
   const { canEdit } = useAuth();
   const canEditStaff = canEdit('staff');
 
+  const [branches, setBranches] = useState<Branch[]>(() => readStoredData('branches', []));
   const [staff, setStaff] = useState<StaffMember[]>(() => {
     try {
+      const initialBranches = readStoredData<Branch[]>('branches', []);
       const stored = readStoredData<any[]>('staff', []);
-      return Array.isArray(stored) ? stored.map((item, idx) => normalizeStaffMember(item, idx + 1)) : [];
+      return Array.isArray(stored) ? stored.map((item, idx) => normalizeStaffMember(item, idx + 1, initialBranches)) : [];
     } catch {
       return [];
     }
@@ -150,6 +182,7 @@ export default function Staff() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [payTypeFilter, setPayTypeFilter] = useState<string>('all');
+  const [branchFilter, setBranchFilter] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('table');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
@@ -164,12 +197,30 @@ export default function Staff() {
   useEffect(() => {
     let isMounted = true;
     const loadFromApi = async () => {
+      let currentBranches = readStoredData<Branch[]>('branches', []);
+      if (window.api?.getBranches && window.api?.getToken?.()) {
+        try {
+          const res = await window.api.getBranches();
+          const serverBranches = Array.isArray(res?.data) ? res.data : [];
+          if (serverBranches.length > 0) {
+            currentBranches = serverBranches.map((b: any) => ({
+              id: String(b.id || ''),
+              name: String(b.name || ''),
+            }));
+            if (isMounted) {
+              setBranches(currentBranches);
+              window.localStorage.setItem('branches', JSON.stringify(currentBranches));
+            }
+          }
+        } catch {}
+      }
+
       if (!window.api?.getToken?.() || !window.api?.getStaff) return;
       try {
         const response = await window.api.getStaff();
         const rawData = response?.data;
         if (Array.isArray(rawData) && isMounted) {
-          const normalized = rawData.map((item, idx) => normalizeStaffMember(item, idx + 1));
+          const normalized = rawData.map((item, idx) => normalizeStaffMember(item, idx + 1, currentBranches));
           setStaff(normalized);
           window.localStorage.setItem('staff', JSON.stringify(normalized));
         }
@@ -183,9 +234,69 @@ export default function Staff() {
     };
   }, []);
 
+  // ── Automatic Monthly Salary Recording (أول كل شهر تلقائياً) ──
+  useEffect(() => {
+    if (!staff || staff.length === 0) return;
+
+    const currentMonthKey = new Date().toISOString().slice(0, 7); // e.g. "2026-09"
+    const lastProcessedMonth = window.localStorage.getItem('staff_salaries_last_processed_month');
+
+    if (lastProcessedMonth !== currentMonthKey) {
+      // Auto-record all staff salaries for this new month
+      let recordedCount = 0;
+      let totalAmount = 0;
+      const todayDate = `${currentMonthKey}-01`;
+
+      staff.forEach((member) => {
+        const rate = Number(member.rate) || 0;
+        const hours = Number(member.hours) || 0;
+        const revenue = Number(member.revenue) || 0;
+        const advance = Number(member.advance) || 0;
+
+        const grossPay =
+          member.payType === 'hour'
+            ? rate * hours
+            : member.payType === 'percent'
+              ? (rate / 100) * revenue
+              : rate;
+
+        const netPay = Math.max(0, grossPay - advance);
+
+        if (netPay > 0 || grossPay > 0) {
+          const matchedBranch = branches.find((b) => b.name === member.branch || b.id === member.branchId);
+          const branchName = matchedBranch?.name || member.branch || 'الفرع الرئيسي';
+          const branchId = matchedBranch?.id || member.branchId || '';
+
+          recordFinanceTransaction({
+            type: 'expense',
+            amount: netPay,
+            category: 'رواتب',
+            branch: branchName,
+            branchId,
+            branchName,
+            relatedTo: member.name,
+            description: `راتب شهر ${currentMonthKey} - ${member.name} (${member.role}) | الراتب: ${grossPay} ج | سلف مستقطعة: ${advance} ج | الصافي: ${netPay} ج`,
+            date: todayDate,
+          });
+
+          recordedCount += 1;
+          totalAmount += netPay;
+        }
+      });
+
+      if (recordedCount > 0) {
+        window.localStorage.setItem('staff_salaries_last_processed_month', currentMonthKey);
+        setToast({
+          message: `تم ترحيل رواتب شهر (${currentMonthKey}) تلقائياً كمصروفات بالمالية بإجمالي ${totalAmount.toLocaleString()} ج.م 🗓️💸`,
+          type: 'success',
+        });
+      }
+    }
+  }, [staff, branches]);
+
   useEffect(() => {
     if (!toast) return;
-    const timer = window.setTimeout(() => setToast(null), 2500);
+    const timer = window.setTimeout(() => setToast(null), 3000);
     return () => window.clearTimeout(timer);
   }, [toast]);
 
@@ -211,17 +322,21 @@ export default function Staff() {
         serial.includes(term);
 
       const matchesPayType = payTypeFilter === 'all' || (member.payType || 'hour') === payTypeFilter;
+      const matchesBranch =
+        branchFilter === 'all' ||
+        (member.branch || '').toLowerCase() === branchFilter.toLowerCase() ||
+        member.branchId === branchFilter;
 
-      return matchesSearch && matchesPayType;
+      return matchesSearch && matchesPayType && matchesBranch;
     });
-  }, [staff, search, payTypeFilter]);
+  }, [staff, search, payTypeFilter, branchFilter]);
 
   const [currentPage, setCurrentPage] = useState(1);
   const rowsPerPage = 10;
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, payTypeFilter]);
+  }, [search, payTypeFilter, branchFilter]);
 
   const totalPages = Math.ceil(filteredStaff.length / rowsPerPage) || 1;
   const paginatedStaff = useMemo(() => {
@@ -229,30 +344,122 @@ export default function Staff() {
     return filteredStaff.slice(start, start + rowsPerPage);
   }, [filteredStaff, currentPage]);
 
+  const calculateMemberGrossPay = (member: StaffMember) => {
+    const rate = Number(member.rate) || 0;
+    const hours = Number(member.hours) || 0;
+    const revenue = Number(member.revenue) || 0;
+    if (member.payType === 'hour') return rate * hours;
+    if (member.payType === 'percent') return (rate / 100) * revenue;
+    return rate;
+  };
+
+  const calculateMemberNetPay = (member: StaffMember) => {
+    const gross = calculateMemberGrossPay(member);
+    const advance = Number(member.advance) || 0;
+    return Math.max(0, gross - advance);
+  };
+
   const metrics = useMemo(() => {
-    let hour = 0;
-    let fixed = 0;
-    let percent = 0;
+    let grossTotal = 0;
+    let advanceTotal = 0;
+    let netTotal = 0;
 
     if (Array.isArray(staff)) {
       staff.forEach((member) => {
         if (!member) return;
-        const rate = Number(member.rate) || 0;
-        const hours = Number(member.hours) || 0;
-        const revenue = Number(member.revenue) || 0;
+        const gross = calculateMemberGrossPay(member);
+        const adv = Number(member.advance) || 0;
+        const net = Math.max(0, gross - adv);
 
-        if (member.payType === 'hour') {
-          hour += rate * hours;
-        } else if (member.payType === 'percent') {
-          percent += (rate / 100) * revenue;
-        } else {
-          fixed += rate;
-        }
+        grossTotal += gross;
+        advanceTotal += adv;
+        netTotal += net;
       });
     }
 
-    return { total: staff.length, hour, fixed, percent, grandTotal: hour + fixed + percent };
+    return { total: staff.length, grossTotal, advanceTotal, netTotal };
   }, [staff]);
+
+  const handlePaySalary = (member: StaffMember) => {
+    const gross = calculateMemberGrossPay(member);
+    const advance = Number(member.advance) || 0;
+    const netPay = Math.max(0, gross - advance);
+
+    if (netPay <= 0 && gross <= 0) {
+      showToast('المبلغ المستحق يجب أن يكون أكبر من 0', 'error');
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `تفاصيل صرف المستحقات للموظف: ${member.name}\n- الراتب الإجمالي: ${gross.toLocaleString()} ج.م\n- السلف المستقطعة: ${advance.toLocaleString()} ج.م\n- صافي المبلغ للصرف: ${netPay.toLocaleString()} ج.م\n\nهل تريد تأكيد الصرف وترحيله للمالية؟`
+      )
+    ) {
+      return;
+    }
+
+    const matchedBranch = branches.find((b) => b.name === member.branch || b.id === member.branchId);
+    const branchName = matchedBranch?.name || member.branch || 'الفرع الرئيسي';
+    const branchId = matchedBranch?.id || member.branchId || '';
+
+    recordFinanceTransaction({
+      type: 'expense',
+      amount: netPay,
+      category: 'رواتب',
+      branch: branchName,
+      branchId,
+      branchName,
+      relatedTo: member.name,
+      description: `صرف راتب ${member.name} (${member.role}) | الراتب: ${gross} ج | سلف: ${advance} ج | الصافي: ${netPay} ج`,
+      date: new Date().toISOString().split('T')[0],
+    });
+
+    showToast(`تم صرف وتسجيل صافي راتب ${member.name} (${netPay.toLocaleString()} ج.م) كمصروف في المالية بنجاح 💸`, 'success');
+  };
+
+  const handleManualMonthSync = () => {
+    const currentMonthKey = new Date().toISOString().slice(0, 7);
+    const activeWithPay = staff.filter((member) => calculateMemberGrossPay(member) > 0);
+
+    if (activeWithPay.length === 0) {
+      showToast('لا توجد مستحقات مالية للصرف حالياً', 'info');
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `هل تريد ترحيل وصرف رواتب شهر (${currentMonthKey}) لجميع الموظفين (${activeWithPay.length} موظف)؟\n- إجمالي الرواتب: ${metrics.grossTotal.toLocaleString()} ج.م\n- إجمالي السلف المستقطعة: ${metrics.advanceTotal.toLocaleString()} ج.م\n- صافي المبلغ المالي: ${metrics.netTotal.toLocaleString()} ج.م`
+      )
+    ) {
+      return;
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+    activeWithPay.forEach((member) => {
+      const gross = calculateMemberGrossPay(member);
+      const advance = Number(member.advance) || 0;
+      const netPay = Math.max(0, gross - advance);
+
+      const matchedBranch = branches.find((b) => b.name === member.branch || b.id === member.branchId);
+      const branchName = matchedBranch?.name || member.branch || 'الفرع الرئيسي';
+      const branchId = matchedBranch?.id || member.branchId || '';
+
+      recordFinanceTransaction({
+        type: 'expense',
+        amount: netPay,
+        category: 'رواتب',
+        branch: branchName,
+        branchId,
+        branchName,
+        relatedTo: member.name,
+        description: `راتب شهر ${currentMonthKey} - ${member.name} (${member.role}) | الراتب: ${gross} ج | سلف: ${advance} ج | الصافي: ${netPay} ج`,
+        date: today,
+      });
+    });
+
+    window.localStorage.setItem('staff_salaries_last_processed_month', currentMonthKey);
+    showToast(`تم ترحيل رواتب ${activeWithPay.length} موظف بصافي ${metrics.netTotal.toLocaleString()} ج.م للمالية بنجاح ✅`, 'success');
+  };
 
   const handleEdit = (index: number) => {
     const member = staff[index];
@@ -262,10 +469,13 @@ export default function Staff() {
       name: member.name || '',
       phone: member.phone ?? '',
       role: member.role || '',
+      branch: member.branch || '',
       payType: member.payType || 'hour',
       rate: member.rate || 0,
       hours: member.hours || 0,
       revenue: member.revenue || 0,
+      advance: member.advance || 0,
+      recordToFinance: false,
     });
     setIsModalOpen(true);
   };
@@ -289,6 +499,10 @@ export default function Staff() {
       return;
     }
 
+    const matchedBranch = branches.find((b) => b.name === formState.branch || b.id === formState.branch);
+    const branchName = matchedBranch?.name || formState.branch || '';
+    const branchId = matchedBranch?.id || (formState.branch.includes('-') ? formState.branch : '');
+
     try {
       if (editingIndex !== null && staff[editingIndex]) {
         const targetMember = staff[editingIndex];
@@ -296,10 +510,12 @@ export default function Staff() {
           name: trimmedName,
           phone: formState.phone.trim() || null,
           role: trimmedRole,
+          branch_id: branchId || null,
           pay_type: formState.payType,
           rate: Number(formState.rate) || 0,
           hours: Number(formState.hours) || 0,
           revenue: Number(formState.revenue) || 0,
+          advance: Number(formState.advance) || 0,
         };
 
         if (window.api?.updateStaff && targetMember.id) {
@@ -318,14 +534,43 @@ export default function Staff() {
                   name: trimmedName,
                   phone: formState.phone.trim(),
                   role: trimmedRole,
+                  branch: branchName,
+                  branchId,
                   payType: formState.payType,
                   rate: Number(formState.rate) || 0,
                   hours: Number(formState.hours) || 0,
                   revenue: Number(formState.revenue) || 0,
+                  advance: Number(formState.advance) || 0,
                 }
               : m
           )
         );
+
+        if (formState.recordToFinance) {
+          const gross =
+            formState.payType === 'hour'
+              ? Number(formState.rate) * Number(formState.hours)
+              : formState.payType === 'percent'
+                ? (Number(formState.rate) / 100) * Number(formState.revenue)
+                : Number(formState.rate);
+
+          const net = Math.max(0, gross - Number(formState.advance || 0));
+
+          if (net > 0) {
+            recordFinanceTransaction({
+              type: 'expense',
+              amount: net,
+              category: 'رواتب',
+              branch: branchName || 'الفرع الرئيسي',
+              branchId,
+              branchName: branchName || 'الفرع الرئيسي',
+              relatedTo: trimmedName,
+              description: `صرف راتب: ${trimmedName} (${trimmedRole}) | الراتب: ${gross} ج | سلف: ${formState.advance} ج | الصافي: ${net} ج`,
+              date: new Date().toISOString().split('T')[0],
+            });
+          }
+        }
+
         showToast('تم تعديل بيانات الموظف بنجاح');
       } else {
         const nextSeq = getNextStaffSequence(staff);
@@ -341,10 +586,12 @@ export default function Staff() {
           name: trimmedName,
           phone: formState.phone.trim() || null,
           role: trimmedRole,
+          branch_id: branchId || null,
           pay_type: formState.payType,
           rate: Number(formState.rate) || 0,
           hours: Number(formState.hours) || 0,
           revenue: Number(formState.revenue) || 0,
+          advance: Number(formState.advance) || 0,
         };
 
         if (window.api?.createStaff) {
@@ -365,13 +612,42 @@ export default function Staff() {
           name: trimmedName,
           phone: formState.phone.trim(),
           role: trimmedRole,
+          branch: branchName,
+          branchId,
           payType: formState.payType,
           rate: Number(formState.rate) || 0,
           hours: Number(formState.hours) || 0,
           revenue: Number(formState.revenue) || 0,
+          advance: Number(formState.advance) || 0,
         };
 
         setStaff((current) => [...current, newMember]);
+
+        if (formState.recordToFinance) {
+          const gross =
+            formState.payType === 'hour'
+              ? Number(formState.rate) * Number(formState.hours)
+              : formState.payType === 'percent'
+                ? (Number(formState.rate) / 100) * Number(formState.revenue)
+                : Number(formState.rate);
+
+          const net = Math.max(0, gross - Number(formState.advance || 0));
+
+          if (net > 0) {
+            recordFinanceTransaction({
+              type: 'expense',
+              amount: net,
+              category: 'رواتب',
+              branch: branchName || 'الفرع الرئيسي',
+              branchId,
+              branchName: branchName || 'الفرع الرئيسي',
+              relatedTo: trimmedName,
+              description: `صرف راتب: ${trimmedName} (${trimmedRole}) | الراتب: ${gross} ج | سلف: ${formState.advance} ج | الصافي: ${net} ج`,
+              date: new Date().toISOString().split('T')[0],
+            });
+          }
+        }
+
         showToast('تم إضافة الموظف بنجاح');
       }
     } catch (err) {
@@ -403,10 +679,15 @@ export default function Staff() {
     }
   };
 
-  const handleInlineUpdate = (id: string, key: 'hours' | 'revenue', value: number) => {
+  const handleInlineUpdate = (id: string, key: 'hours' | 'revenue' | 'advance', value: number) => {
+    const safeVal = Math.max(0, value || 0);
     setStaff((current) =>
-      current.map((member) => (member.id === id ? { ...member, [key]: Math.max(0, value || 0) } : member))
+      current.map((member) => (member.id === id ? { ...member, [key]: safeVal } : member))
     );
+
+    if (window.api?.updateStaff) {
+      void window.api.updateStaff(id, { [key]: safeVal });
+    }
   };
 
   const handleSendStaffWhatsApp = (member: StaffMember) => {
@@ -418,16 +699,11 @@ export default function Staff() {
     let cleanPhone = member.phone.replace(/\D/g, '');
     if (cleanPhone.startsWith('01')) cleanPhone = '2' + cleanPhone;
 
-    const calculatePay = () => {
-      const rate = Number(member.rate) || 0;
-      const hours = Number(member.hours) || 0;
-      const revenue = Number(member.revenue) || 0;
-      if (member.payType === 'hour') return rate * hours;
-      if (member.payType === 'percent') return (rate / 100) * revenue;
-      return rate;
-    };
+    const gross = calculateMemberGrossPay(member);
+    const advance = Number(member.advance) || 0;
+    const net = Math.max(0, gross - advance);
 
-    const caption = `*إيجي سبورتنج كلوب*\n\nبيان مستحقات الموظف/المدرب: ${member.name}\nالكود: ${member.staffSerial}\nالوظيفة: ${member.role}\nنوع التعاقد: ${payTypeLabel(member.payType)}\nالمبلغ المحسوب: ${calculatePay()} ج.م\n\nشكراً لجهودكم المتميزة ⚽`;
+    const caption = `*إيجي سبورتنج كلوب*\n\nبيان مستحقات الموظف/المدرب: ${member.name}\nالكود: ${member.staffSerial}\nالوظيفة: ${member.role}\nالفرع: ${member.branch || 'الرئيسي'}\nنوع التعاقد: ${payTypeLabel(member.payType)}\nالراتب الإجمالي: ${gross.toLocaleString()} ج.م\nالسلف المستقطعة: ${advance.toLocaleString()} ج.م\n*الصافي المستحق للصرف: ${net.toLocaleString()} ج.م*\n\nشكراً لجهودكم المتميزة ⚽`;
     window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(caption)}`, '_blank');
   };
 
@@ -452,12 +728,25 @@ export default function Staff() {
               <AppIcon icon={User01} className="h-6 w-6" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-slate-900">إدارة الطاقم والمدربين</h1>
-              <p className="text-xs text-slate-500">متابعة رواتب ومستحقات المدربين والموظفين بدقة</p>
+              <h1 className="text-xl font-bold text-slate-900">إدارة الطاقم والمدربين والرواتب</h1>
+              <p className="text-xs text-slate-500">
+                تسجيل السلف، احتساب الصافي، والترحيل التلقائي أول كل شهر إلى المالية
+              </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {canEditStaff && (
+              <button
+                type="button"
+                onClick={handleManualMonthSync}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-300 bg-emerald-50 px-3.5 py-2.5 text-xs font-bold text-emerald-700 shadow-xs transition hover:bg-emerald-100"
+                title="ترحيل وصرف رواتب الشهر الحالي لجميع الطاقم للمالية"
+              >
+                <Calendar className="h-4 w-4 text-emerald-600" />
+                ترحيل رواتب الشهر للمالية 🗓️
+              </button>
+            )}
             {canEditStaff && (
               <button
                 type="button"
@@ -486,19 +775,19 @@ export default function Staff() {
         <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3 text-right">
             <span className="text-xs font-medium text-slate-500">إجمالي الطاقم</span>
-            <p className="mt-1 text-xl font-bold text-slate-900">{metrics.total}</p>
+            <p className="mt-1 text-xl font-bold text-slate-900">{metrics.total} موظف</p>
           </div>
           <div className="rounded-xl border border-sky-100 bg-sky-50/50 p-3 text-right">
-            <span className="text-xs font-medium text-sky-600">بالساعة</span>
-            <p className="mt-1 text-xl font-bold text-sky-700">{metrics.hour.toLocaleString()} ج</p>
+            <span className="text-xs font-medium text-sky-600">إجمالي الرواتب الأصلية</span>
+            <p className="mt-1 text-xl font-bold text-sky-700">{metrics.grossTotal.toLocaleString()} ج</p>
+          </div>
+          <div className="rounded-xl border border-rose-100 bg-rose-50/50 p-3 text-right">
+            <span className="text-xs font-medium text-rose-600">إجمالي السلف والاستلاف</span>
+            <p className="mt-1 text-xl font-bold text-rose-700">-{metrics.advanceTotal.toLocaleString()} ج</p>
           </div>
           <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 p-3 text-right">
-            <span className="text-xs font-medium text-emerald-600">رواتب ثابتة</span>
-            <p className="mt-1 text-xl font-bold text-emerald-700">{metrics.fixed.toLocaleString()} ج</p>
-          </div>
-          <div className="rounded-xl border border-amber-100 bg-amber-50/50 p-3 text-right">
-            <span className="text-xs font-medium text-amber-600">عمولات ونسب</span>
-            <p className="mt-1 text-xl font-bold text-amber-700">{metrics.percent.toLocaleString()} ج</p>
+            <span className="text-xs font-medium text-emerald-600">صافي المستحق للصرف</span>
+            <p className="mt-1 text-xl font-bold text-emerald-700">{metrics.netTotal.toLocaleString()} ج</p>
           </div>
         </div>
       </div>
@@ -506,7 +795,7 @@ export default function Staff() {
       {/* ── Search & Filter Card ── */}
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="grid gap-3 sm:grid-cols-3">
-          <div className="relative flex items-center sm:col-span-2">
+          <div className="relative flex items-center">
             <SearchSm className="absolute right-3 h-4 w-4 text-slate-400" />
             <input
               value={search}
@@ -517,9 +806,22 @@ export default function Staff() {
           </div>
 
           <select
+            value={branchFilter}
+            onChange={(e) => setBranchFilter(e.target.value)}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-700 outline-none focus:border-sky-500 focus:bg-white"
+          >
+            <option value="all">كل الفروع</option>
+            {branches.map((b) => (
+              <option key={b.id || b.name} value={b.name || ''}>
+                {b.name}
+              </option>
+            ))}
+          </select>
+
+          <select
             value={payTypeFilter}
             onChange={(e) => setPayTypeFilter(e.target.value)}
-            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-700 outline-none"
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-700 outline-none focus:border-sky-500 focus:bg-white"
           >
             <option value="all">جميع أنواع التعاقد</option>
             <option value="hour">بالساعة فقط</option>
@@ -540,15 +842,9 @@ export default function Staff() {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {paginatedStaff.map((member) => {
               const originalIndex = staff.findIndex((m) => m.id === member.id);
-              const rate = Number(member.rate) || 0;
-              const hours = Number(member.hours) || 0;
-              const revenue = Number(member.revenue) || 0;
-              const calculatedPay =
-                member.payType === 'hour'
-                  ? rate * hours
-                  : member.payType === 'percent'
-                    ? (rate / 100) * revenue
-                    : rate;
+              const gross = calculateMemberGrossPay(member);
+              const advance = Number(member.advance) || 0;
+              const netPay = Math.max(0, gross - advance);
 
               return (
                 <div
@@ -583,26 +879,61 @@ export default function Staff() {
 
                     <div className="mt-3 space-y-2 text-xs text-slate-600">
                       <div className="flex items-center justify-between bg-slate-50 p-2 rounded-lg">
-                        <span className="text-slate-500">الهاتف:</span>
-                        <span className="font-mono text-slate-800">{member.phone || '-'}</span>
+                        <span className="text-slate-500">الفرع:</span>
+                        <span className="font-semibold text-sky-800 bg-sky-50 px-2 py-0.5 rounded border border-sky-100">
+                          {member.branch || 'الفرع الرئيسي'}
+                        </span>
                       </div>
 
                       <div className="flex items-center justify-between bg-slate-50 p-2 rounded-lg">
-                        <span className="text-slate-500">المستحق الحسابي:</span>
-                        <span className="font-bold text-emerald-600">{calculatedPay.toLocaleString()} ج.م</span>
+                        <span className="text-slate-500">الراتب المستحق:</span>
+                        <span className="font-bold text-slate-800">{gross.toLocaleString()} ج.م</span>
+                      </div>
+
+                      <div className="flex items-center justify-between bg-rose-50/50 p-2 rounded-lg border border-rose-100">
+                        <span className="text-rose-600 font-medium">السلف / الاستلاف:</span>
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="number"
+                            min={0}
+                            value={member.advance ?? 0}
+                            onChange={(e) => handleInlineUpdate(member.id, 'advance', Number(e.target.value))}
+                            className="w-16 rounded border border-rose-200 bg-white px-1.5 py-0.5 text-center font-bold text-rose-700 outline-none"
+                            placeholder="0"
+                          />
+                          <span className="text-[10px] text-rose-600 font-bold">ج.م</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between bg-emerald-50 p-2 rounded-lg border border-emerald-200">
+                        <span className="font-bold text-emerald-800">الصافي آخر الشهر:</span>
+                        <span className="font-extrabold text-sm text-emerald-700">{netPay.toLocaleString()} ج.م</span>
                       </div>
                     </div>
                   </div>
 
                   <div className="mt-4 flex items-center justify-between gap-2 border-t border-slate-100 pt-3">
-                    <button
-                      type="button"
-                      onClick={() => handleSendStaffWhatsApp(member)}
-                      className="rounded-lg bg-emerald-50 p-1.5 text-emerald-700 hover:bg-emerald-100 transition"
-                      title="واتساب"
-                    >
-                      <AppIcon icon={Phone01} className="h-4 w-4" />
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handleSendStaffWhatsApp(member)}
+                        className="rounded-lg bg-emerald-50 p-1.5 text-emerald-700 hover:bg-emerald-100 transition"
+                        title="إرسال بيان بالواتساب"
+                      >
+                        <AppIcon icon={Phone01} className="h-4 w-4" />
+                      </button>
+
+                      {canEditStaff && (
+                        <button
+                          type="button"
+                          onClick={() => handlePaySalary(member)}
+                          className="rounded-lg border border-emerald-300 bg-emerald-600 px-2.5 py-1 text-xs font-bold text-white hover:bg-emerald-700 shadow-xs transition"
+                          title="صرف الصافي وتسجيله كمصروف في المالية"
+                        >
+                          صرف الصافي 💵
+                        </button>
+                      )}
+                    </div>
 
                     {canEditStaff && (
                       <div className="flex items-center gap-1">
@@ -636,37 +967,38 @@ export default function Staff() {
             <table className="w-full text-right text-xs divide-y divide-slate-200">
               <thead className="bg-slate-50 text-slate-500">
                 <tr>
-                  <th className="px-4 py-3 font-semibold">الكود</th>
-                  <th className="px-4 py-3 font-semibold">الاسم</th>
-                  <th className="px-4 py-3 font-semibold">الهاتف</th>
-                  <th className="px-4 py-3 font-semibold">الوظيفة</th>
-                  <th className="px-4 py-3 font-semibold">نوع التعاقد</th>
-                  <th className="px-4 py-3 font-semibold">القيمة/المعدل</th>
-                  <th className="px-4 py-3 font-semibold">الساعات/الإيراد</th>
-                  <th className="px-4 py-3 font-semibold">الإجمالي</th>
-                  <th className="px-4 py-3 text-center font-semibold">الإجراءات</th>
+                  <th className="px-3 py-3 font-semibold">الكود</th>
+                  <th className="px-3 py-3 font-semibold">الاسم</th>
+                  <th className="px-3 py-3 font-semibold">الفرع</th>
+                  <th className="px-3 py-3 font-semibold">الوظيفة</th>
+                  <th className="px-3 py-3 font-semibold">نوع التعاقد</th>
+                  <th className="px-3 py-3 font-semibold">المعدل/القيمة</th>
+                  <th className="px-3 py-3 font-semibold">ساعات/إيراد</th>
+                  <th className="px-3 py-3 font-semibold">الراتب الأصلي</th>
+                  <th className="px-3 py-3 font-semibold text-rose-600">السلف / استلاف</th>
+                  <th className="px-3 py-3 font-semibold text-emerald-700">الصافي للصرف</th>
+                  <th className="px-3 py-3 text-center font-semibold">الإجراءات</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
                 {paginatedStaff.map((member) => {
                   const originalIndex = staff.findIndex((m) => m.id === member.id);
                   const rate = Number(member.rate) || 0;
-                  const hours = Number(member.hours) || 0;
-                  const revenue = Number(member.revenue) || 0;
-                  const calculatedPay =
-                    member.payType === 'hour'
-                      ? rate * hours
-                      : member.payType === 'percent'
-                        ? (rate / 100) * revenue
-                        : rate;
+                  const gross = calculateMemberGrossPay(member);
+                  const advance = Number(member.advance) || 0;
+                  const netPay = Math.max(0, gross - advance);
 
                   return (
                     <tr key={member.id} className="hover:bg-slate-50/70 transition">
-                      <td className="px-4 py-3 font-mono font-medium text-slate-700">{member.staffSerial || '-'}</td>
-                      <td className="px-4 py-3 font-bold text-slate-900">{member.name || 'بدون اسم'}</td>
-                      <td className="px-4 py-3 font-mono text-slate-600">{member.phone || '-'}</td>
-                      <td className="px-4 py-3 text-slate-700">{member.role || '-'}</td>
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-3 font-mono font-medium text-slate-700">{member.staffSerial || '-'}</td>
+                      <td className="px-3 py-3 font-bold text-slate-900">{member.name || 'بدون اسم'}</td>
+                      <td className="px-3 py-3">
+                        <span className="inline-flex rounded-lg bg-sky-50 px-2 py-0.5 text-xs font-bold text-sky-800 border border-sky-100">
+                          {member.branch || 'الفرع الرئيسي'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-slate-700">{member.role || '-'}</td>
+                      <td className="px-3 py-3">
                         <span
                           className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold ${payTypeBadgeStyle(
                             member.payType
@@ -675,15 +1007,15 @@ export default function Staff() {
                           {payTypeLabel(member.payType)}
                         </span>
                       </td>
-                      <td className="px-4 py-3 font-semibold text-slate-800">{rate} ج</td>
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-3 font-semibold text-slate-800">{rate} ج</td>
+                      <td className="px-3 py-3">
                         {member.payType === 'hour' ? (
                           <input
                             type="number"
                             min={0}
                             value={member.hours ?? 0}
                             onChange={(e) => handleInlineUpdate(member.id, 'hours', Number(e.target.value))}
-                            className="w-16 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-center font-bold text-slate-900 outline-none focus:border-sky-500"
+                            className="w-14 rounded-lg border border-slate-200 bg-slate-50 px-1.5 py-1 text-center font-bold text-slate-900 outline-none focus:border-sky-500"
                           />
                         ) : member.payType === 'percent' ? (
                           <input
@@ -691,14 +1023,27 @@ export default function Staff() {
                             min={0}
                             value={member.revenue ?? 0}
                             onChange={(e) => handleInlineUpdate(member.id, 'revenue', Number(e.target.value))}
-                            className="w-20 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-center font-bold text-slate-900 outline-none focus:border-sky-500"
+                            className="w-16 rounded-lg border border-slate-200 bg-slate-50 px-1.5 py-1 text-center font-bold text-slate-900 outline-none focus:border-sky-500"
                           />
                         ) : (
                           <span className="text-slate-400">-</span>
                         )}
                       </td>
-                      <td className="px-4 py-3 font-bold text-emerald-600">{calculatedPay.toLocaleString()} ج</td>
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-3 font-bold text-slate-800">{gross.toLocaleString()} ج</td>
+                      <td className="px-3 py-3">
+                        <input
+                          type="number"
+                          min={0}
+                          value={member.advance ?? 0}
+                          onChange={(e) => handleInlineUpdate(member.id, 'advance', Number(e.target.value))}
+                          className="w-16 rounded-lg border border-rose-200 bg-rose-50/60 px-1.5 py-1 text-center font-bold text-rose-700 outline-none focus:border-rose-500 focus:bg-white"
+                          placeholder="0"
+                        />
+                      </td>
+                      <td className="px-3 py-3 font-extrabold text-emerald-600 bg-emerald-50/40">
+                        {netPay.toLocaleString()} ج
+                      </td>
+                      <td className="px-3 py-3">
                         <div className="flex items-center justify-center gap-1.5">
                           <button
                             type="button"
@@ -712,8 +1057,19 @@ export default function Staff() {
                           {canEditStaff && (
                             <button
                               type="button"
+                              onClick={() => handlePaySalary(member)}
+                              className="rounded-lg border border-emerald-300 bg-emerald-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-emerald-700 transition"
+                              title="صرف الصافي وتسجيله في المالية"
+                            >
+                              صرف 💵
+                            </button>
+                          )}
+
+                          {canEditStaff && (
+                            <button
+                              type="button"
                               onClick={() => handleEdit(originalIndex)}
-                              className="rounded-lg bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-200 transition"
+                              className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-200 transition"
                             >
                               تعديل
                             </button>
@@ -736,7 +1092,7 @@ export default function Staff() {
 
                 {filteredStaff.length === 0 && (
                   <tr>
-                    <td colSpan={9} className="px-4 py-10 text-center text-slate-400 text-xs">
+                    <td colSpan={11} className="px-4 py-10 text-center text-slate-400 text-xs">
                       لا يوجد موظفون يطابقون البحث.
                     </td>
                   </tr>
@@ -792,6 +1148,22 @@ export default function Staff() {
               </div>
 
               <div>
+                <label className="block mb-1 font-semibold text-slate-700">الفرع</label>
+                <select
+                  value={formState.branch}
+                  onChange={(e) => setFormState((prev) => ({ ...prev, branch: e.target.value }))}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-700 outline-none focus:border-sky-500 focus:bg-white"
+                >
+                  <option value="">-- اختر الفرع --</option>
+                  {branches.map((b) => (
+                    <option key={b.id || b.name} value={b.name || ''}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
                 <label className="block mb-1 font-semibold text-slate-700">
                   رقم الهاتف
                   <span
@@ -842,7 +1214,7 @@ export default function Staff() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block mb-1 font-semibold text-slate-700">القيمة / المبلغ</label>
+                  <label className="block mb-1 font-semibold text-slate-700">القيمة / الراتب (ج.م)</label>
                   <input
                     type="number"
                     min={0}
@@ -879,6 +1251,39 @@ export default function Staff() {
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
                   />
                 </div>
+              </div>
+
+              {/* Advance input */}
+              <div>
+                <label className="block mb-1 font-semibold text-rose-700">
+                  السلف / الاستلاف المستقطع (ج.م)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={formState.advance === 0 ? '' : formState.advance}
+                  placeholder="0"
+                  onChange={(e) => setFormState((prev) => ({ ...prev, advance: Math.max(0, Number(e.target.value)) }))}
+                  className="w-full rounded-xl border border-rose-200 bg-rose-50/50 px-3 py-2.5 text-xs font-bold text-rose-800 outline-none focus:border-rose-500 focus:bg-white"
+                />
+                <p className="mt-1 text-[11px] text-slate-400">
+                  يتم خصم هذا المبلغ تلقائياً من إجمالي الراتب ليصبح الصافي المستحق للصرف واضحاً.
+                </p>
+              </div>
+
+              {/* Sync to finance option */}
+              <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 p-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formState.recordToFinance}
+                    onChange={(e) => setFormState((prev) => ({ ...prev, recordToFinance: e.target.checked }))}
+                    className="h-4 w-4 rounded text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <span className="font-semibold text-xs text-emerald-800">
+                    تسجيل وصرف صافي هذا الراتب كمصروف حالي في قسم المالية 💵
+                  </span>
+                </label>
               </div>
 
               <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/50 -mx-5 -mb-5 px-5 py-3 mt-4">

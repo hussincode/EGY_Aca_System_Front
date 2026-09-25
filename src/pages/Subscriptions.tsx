@@ -176,16 +176,30 @@ function getSubscriptionRemaining(subscription: SubscriptionRecord) {
   return Math.max(0, getSubscriptionTotal(subscription) - getSubscriptionPaid(subscription));
 }
 
+function formatDate(dateStr?: string | null): string {
+  if (!dateStr) return '';
+  const str = String(dateStr).trim();
+  if (!str) return '';
+  if (str.includes('T')) {
+    return str.split('T')[0];
+  }
+  if (str.includes(' ')) {
+    return str.split(' ')[0];
+  }
+  return str;
+}
+
 function getEffectiveSubscriptionStatus(sub: SubscriptionRecord | undefined | null): 'active' | 'expired' | 'cancelled' {
   if (!sub) return 'expired';
   if (sub.status === 'cancelled') return 'cancelled';
   if (sub.status === 'expired') return 'expired';
 
-  if (sub.endDate) {
+  const cleanEnd = formatDate(sub.endDate);
+  if (cleanEnd) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const [year, month, day] = sub.endDate.split('-').map(Number);
+    const [year, month, day] = cleanEnd.split('-').map(Number);
     let end: Date;
     if (year && month && day) {
       end = new Date(year, month - 1, day, 23, 59, 59, 999);
@@ -398,8 +412,8 @@ export default function Subscriptions() {
             sessions: Number(item.sessions || 0),
             subscriptionValue: Number(item.subscriptionValue ?? item.subscription_value ?? 0),
             paidAmount: Number(item.paidAmount ?? item.paid_amount ?? 0),
-            startDate: String(item.startDate || item.start_date || ''),
-            endDate: String(item.endDate || item.end_date || ''),
+            startDate: formatDate(item.startDate || item.start_date || ''),
+            endDate: formatDate(item.endDate || item.end_date || ''),
             status: item.status === 'cancelled' ? 'cancelled' : item.status === 'expired' ? 'expired' : 'active',
             invoiceNumber: String(item.invoiceNumber || item.invoice_number || ''),
           };
@@ -498,8 +512,8 @@ export default function Subscriptions() {
       drawField('قيمة الاشتراك', `${currentInvoice.subscriptionValue} ج.م`);
       drawField('المبلغ المدفوع', `${currentInvoice.paidAmount} ج.م`, '#16a34a');
       drawField('المتبقي', `${getSubscriptionRemaining(currentInvoice)} ج.م`, getSubscriptionRemaining(currentInvoice) > 0 ? '#ef4444' : '#16a34a');
-      drawField('تاريخ البداية', currentInvoice.startDate);
-      drawField('تاريخ الانتهاء', currentInvoice.endDate);
+      drawField('تاريخ البداية', formatDate(currentInvoice.startDate) || '-');
+      drawField('تاريخ الانتهاء', formatDate(currentInvoice.endDate) || '-');
 
       ctx.fillStyle = '#f8fafc';
       ctx.fillRect(0, height - 80, width, 80);
@@ -552,7 +566,8 @@ export default function Subscriptions() {
       if (getEffectiveSubscriptionStatus(s) !== 'active') return false;
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      const [year, month, day] = (s.endDate || '').split('-').map(Number);
+      const cleanEnd = formatDate(s.endDate);
+      const [year, month, day] = (cleanEnd || '').split('-').map(Number);
       if (!year || !month || !day) return false;
       const endDate = new Date(year, month - 1, day);
       const diffDays = Math.ceil((endDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
@@ -642,8 +657,8 @@ export default function Subscriptions() {
       sessions: subscription.sessions,
       subscriptionValue: subscription.subscriptionValue,
       paidAmount: subscription.paidAmount,
-      startDate: subscription.startDate,
-      endDate: subscription.endDate,
+      startDate: formatDate(subscription.startDate),
+      endDate: formatDate(subscription.endDate),
       invoiceNumber: subscription.invoiceNumber || '',
     });
     setPlayerSearchQuery(foundPlayer?.name || subscription.player || '');
@@ -664,14 +679,13 @@ export default function Subscriptions() {
 
   const handlePlayerChange = (playerId: string) => {
     const selected = players.find((p) => p.id === playerId);
-    const playerGame = selected?.game || (selected as any)?.game_name || (selected as any)?.sport || '';
     const playerSchedule = selected?.schedule ? selected.schedule.split(', ').map((s) => s.trim()).filter(Boolean) : [];
     const [startTime, endTime] = (selected?.trainingTime || '').split(' - ');
 
     setFormState((prev) => ({
       ...prev,
       playerId,
-      game: playerGame || prev.game,
+      game: prev.game || selected?.game || (selected as any)?.game_name || (games.length > 0 ? games[0].name : ''),
       schedule: playerSchedule.length > 0 ? playerSchedule : prev.schedule,
       trainingTimeStart: startTime || prev.trainingTimeStart,
       trainingTimeEnd: endTime || prev.trainingTimeEnd,
@@ -706,10 +720,12 @@ export default function Subscriptions() {
 
     const selectedPlayer = players.find((player) => player.id === formState.playerId);
     const existingSubscription = subscriptions.find((sub) => sub.id === formState.id);
-    const playerGame = selectedPlayer?.game || (selectedPlayer as any)?.game_name || formState.game || existingSubscription?.game || 'عام';
+    const matchedGame = games.find((g) => g.name === formState.game || g.id === formState.game);
+    const gameName = matchedGame?.name || formState.game.trim() || selectedPlayer?.game || 'عام';
+    const gameId = matchedGame?.id || '';
 
-    if (!formState.playerId || !formState.startDate || !formState.endDate) {
-      showToast('الرجاء ملء الحقول المطلوبة', 'error');
+    if (!formState.playerId || !formState.game.trim() || !formState.startDate || !formState.endDate) {
+      showToast('الرجاء اختيار اللاعب واللعبة وتحديد التواريخ', 'error');
       return;
     }
 
@@ -750,7 +766,7 @@ export default function Subscriptions() {
         selectedPlayer?.playerBarcodeValue ||
         existingSubscription?.playerCode ||
         `P${createStableId('player').slice(-5)}`,
-      game: playerGame,
+      game: gameName,
       branch: branchName,
       branchId: branchId,
       schedule: formState.schedule.join(', '),
@@ -761,11 +777,15 @@ export default function Subscriptions() {
       sessions: formState.sessions,
       subscriptionValue: formState.subscriptionValue,
       paidAmount: formState.paidAmount,
-      startDate: formState.startDate,
-      endDate: formState.endDate,
+      startDate: formatDate(formState.startDate),
+      endDate: formatDate(formState.endDate),
       status: existingSubscription?.status === 'cancelled' ? 'cancelled' : 'active',
       invoiceNumber: formState.invoiceNumber.trim(),
     };
+    if (gameId) {
+      (subscription as any).game_id = gameId;
+      (subscription as any).gameId = gameId;
+    }
 
     try {
       const api = window.api;
@@ -1048,7 +1068,7 @@ export default function Subscriptions() {
     let phone = player?.phone || '';
     if (!phone) return;
     phone = buildWhatsAppNumber(phone);
-    const caption = `*إيجي سبورتنج كلوب*\n\n${customCaption || `فاتورة اشتراك: ${subscription.player}`}\nاللعبة: ${subscription.game}\nالمبلغ المدفوع: ${subscription.paidAmount} ج.م\nالمتبقي: ${getSubscriptionRemaining(subscription)} ج.م\nتاريخ الانتهاء: ${subscription.endDate}\n\nشكراً لاشتراككم معنا ⚽`;
+    const caption = `*إيجي سبورتنج كلوب*\n\n${customCaption || `فاتورة اشتراك: ${subscription.player}`}\nاللعبة: ${subscription.game}\nالمبلغ المدفوع: ${subscription.paidAmount} ج.م\nالمتبقي: ${getSubscriptionRemaining(subscription)} ج.م\nتاريخ الانتهاء: ${formatDate(subscription.endDate)}\n\nشكراً لاشتراككم معنا ⚽`;
     if (phone) {
       window.open(`https://wa.me/${phone}?text=${encodeURIComponent(caption)}`, '_blank');
     }
@@ -1067,7 +1087,7 @@ export default function Subscriptions() {
     const canvas = invoiceCanvasRef.current;
     if (!canvas) return;
     const imgData = canvas.toDataURL('image/jpeg', 0.9);
-    const caption = `*فاتورة اشتراك رقمية*\n\nاللاعب: ${currentInvoice.player}\nاللعبة: ${currentInvoice.game}\nالمبلغ المدفوع: ${currentInvoice.paidAmount} ج.م\nالمتبقي: ${getSubscriptionRemaining(currentInvoice)} ج.م\nتاريخ الانتهاء: ${currentInvoice.endDate}\n\nشكراً لاشتراككم معنا في إيجي سبورتنج كلوب ⚽`;
+    const caption = `*فاتورة اشتراك رقمية*\n\nاللاعب: ${currentInvoice.player}\nاللعبة: ${currentInvoice.game}\nالمبلغ المدفوع: ${currentInvoice.paidAmount} ج.م\nالمتبقي: ${getSubscriptionRemaining(currentInvoice)} ج.م\nتاريخ الانتهاء: ${formatDate(currentInvoice.endDate)}\n\nشكراً لاشتراككم معنا في إيجي سبورتنج كلوب ⚽`;
     if (window.api && typeof window.api.sendInvoiceNotification === 'function') {
       try {
         await window.api.sendInvoiceNotification(phone, imgData, caption);
@@ -1316,7 +1336,8 @@ export default function Subscriptions() {
               const isExpiringSoon = !isCancelled && isActive && (() => {
                 const today = new Date();
                 today.setHours(0, 0, 0, 0);
-                const [year, month, day] = (sub.endDate || '').split('-').map(Number);
+                const cleanEnd = formatDate(sub.endDate);
+                const [year, month, day] = (cleanEnd || '').split('-').map(Number);
                 if (!year || !month || !day) return false;
                 const endDate = new Date(year, month - 1, day);
                 const diffDays = Math.ceil((endDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
@@ -1392,8 +1413,8 @@ export default function Subscriptions() {
 
                     {/* Dates */}
                     <div className="mt-3 flex items-center justify-between text-[11px] text-slate-400 border-t border-slate-100 pt-2">
-                      <span>من: {sub.startDate || '-'}</span>
-                      <span>إلى: {sub.endDate || '-'}</span>
+                      <span>من: {formatDate(sub.startDate) || '-'}</span>
+                      <span>إلى: {formatDate(sub.endDate) || '-'}</span>
                     </div>
                   </div>
 
@@ -1508,7 +1529,7 @@ export default function Subscriptions() {
                         <span className="text-emerald-600 font-semibold">{sub.paidAmount}ج</span> /{' '}
                         <span className={`font-semibold ${remaining > 0 ? 'text-rose-600' : 'text-slate-400'}`}>{remaining}ج</span>
                       </td>
-                      <td className="px-4 py-3 text-slate-500">{sub.startDate} إلى {sub.endDate}</td>
+                      <td className="px-4 py-3 text-slate-500">{formatDate(sub.startDate) || '-'} إلى {formatDate(sub.endDate) || '-'}</td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold ${statusBadgeStyle(sub)}`}>
                           {statusLabel(sub)}
@@ -1672,11 +1693,25 @@ export default function Subscriptions() {
               </div>
 
               <div className="space-y-1">
-                <label className="font-semibold text-slate-700">اللعبة (تلقائي من اللاعب)</label>
-                <div className="w-full rounded-xl border border-slate-200 bg-slate-100 p-2.5 text-right font-medium text-slate-700 flex items-center justify-between">
-                  <span>{players.find((p) => p.id === formState.playerId)?.game || formState.game || '— غير محددة باللاعب —'}</span>
-                  <span className="rounded-md bg-slate-200/80 px-2 py-0.5 text-[10px] text-slate-600">تلقائي</span>
-                </div>
+                <label className="font-semibold text-slate-700">
+                  اللعبة / النشاط <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={formState.game}
+                  onChange={(event) => updateForm('game', event.target.value)}
+                  required
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-right text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white transition"
+                >
+                  <option value="">-- اختر اللعبة --</option>
+                  {games.map((game) => (
+                    <option key={game.id || game.name} value={game.name}>
+                      ⚽ {game.name}
+                    </option>
+                  ))}
+                  {formState.game && !games.some((g) => g.name === formState.game) && (
+                    <option value={formState.game}>⚽ {formState.game}</option>
+                  )}
+                </select>
               </div>
 
               <div className="space-y-1">

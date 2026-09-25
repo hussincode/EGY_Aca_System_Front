@@ -141,6 +141,7 @@ function normalizeFinanceFromApi(
   let finalBranchName = bNameRaw || matchedBranch?.name || '';
 
   const relatedTo = String(row.related_to || row.relatedTo || '').trim();
+  const desc = String(row.description || '').trim();
 
   // Fallback lookup from subscriptions or players if branch is still empty
   if (!finalBranchName && relatedTo) {
@@ -164,6 +165,31 @@ function normalizeFinanceFromApi(
     }
   }
 
+  // Fallback for store transactions or text containing branch name
+  if (!finalBranchName) {
+    if (relatedTo) {
+      const bMatch = branchesList.find((b) => b.name && branchesMatch(b.name, relatedTo));
+      if (bMatch?.name) finalBranchName = bMatch.name;
+    }
+    if (!finalBranchName && desc) {
+      const bMatch = branchesList.find((b) => b.name && branchesMatch(b.name, desc));
+      if (bMatch?.name) finalBranchName = bMatch.name;
+    }
+    if (!finalBranchName) {
+      try {
+        const sales = readStoredData<any[]>('storeSales', []);
+        const prods = readStoredData<any[]>('storeProducts', []);
+        const sMatch = sales.find((s) => s.name && (desc.includes(s.name) || relatedTo.includes(s.name)));
+        if (sMatch?.branch) {
+          finalBranchName = sMatch.branch;
+        } else {
+          const pMatch = prods.find((p) => p.name && (desc.includes(p.name) || relatedTo.includes(p.name)));
+          if (pMatch?.branch) finalBranchName = pMatch.branch;
+        }
+      } catch {}
+    }
+  }
+
   return {
     id: String(row.id || ''),
     type: (String(row.type || '') as FinanceType),
@@ -174,7 +200,7 @@ function normalizeFinanceFromApi(
     relatedTo,
     amount: Number(row.amount || 0),
     date: String(row.date || '').slice(0, 10),
-    description: String(row.description || ''),
+    description: desc,
     createdBy: (row.createdBy || row.created_by) as any,
   };
 }
@@ -234,6 +260,18 @@ export function resolveBranchDisplayName(
         const bMatch = branchesList.find((b) => b.id && b.id.toLowerCase() === playerMatch.branch_id.toLowerCase());
         if (bMatch?.name) return bMatch.name;
       }
+    }
+  }
+
+  // Check if relatedTo or description mentions a branch name
+  if (branchesList.length) {
+    if (entry.relatedTo) {
+      const bMatch = branchesList.find((b) => b.name && branchesMatch(b.name, entry.relatedTo));
+      if (bMatch?.name) return bMatch.name;
+    }
+    if (entry.description) {
+      const bMatch = branchesList.find((b) => b.name && branchesMatch(b.name, entry.description));
+      if (bMatch?.name) return bMatch.name;
     }
   }
 
@@ -461,7 +499,24 @@ export default function Finance() {
         branchesMatch(entry.branch, filterBranch) ||
         branchesMatch(entry.branchName, filterBranch) ||
         entry.branchId === filterBranch;
-      const matchesCategory = !filterCategory || entry.category === filterCategory;
+
+      let matchesCategory = true;
+      if (filterCategory) {
+        const cleanFilter = filterCategory.trim().toLowerCase();
+        const entryCat = (entry.category || '').trim().toLowerCase();
+
+        if (cleanFilter === 'اشتراكات' || cleanFilter === 'الاشتراكات' || cleanFilter === 'عضويات') {
+          matchesCategory = entryCat === 'اشتراكات' || entryCat === 'عضويات' || entryCat.includes('اشتراك') || entryCat.includes('عضو');
+        } else if (cleanFilter === 'رواتب' || cleanFilter === 'الرواتب') {
+          matchesCategory = entryCat === 'رواتب' || entryCat === 'رواتب وأجور' || entryCat === 'طاقم العمل' || entryCat.includes('راتب') || entryCat.includes('رواتب');
+        } else if (cleanFilter === 'مبيعات متجر' || cleanFilter === 'مبيعات المتجر') {
+          matchesCategory = entryCat === 'مبيعات متجر' || entryCat.includes('مبيعات');
+        } else if (cleanFilter === 'مشتريات متجر' || cleanFilter === 'مشتريات المتجر') {
+          matchesCategory = entryCat === 'مشتريات متجر' || entryCat.includes('مشتريات');
+        } else {
+          matchesCategory = entryCat === cleanFilter;
+        }
+      }
 
       let matchesPeriod = true;
       const dateStr = (entry.date || '').slice(0, 10);
@@ -1020,9 +1075,15 @@ export default function Finance() {
             className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-700 outline-none focus:border-sky-500 focus:bg-white"
           >
             <option value="">كل الفئات</option>
-            {categoryOptions.map((cat) => (
-              <option key={cat} value={cat}>{cat}</option>
-            ))}
+            <option value="اشتراكات">🎟️ الاشتراكات والعضويات</option>
+            <option value="رواتب">👥 الرواتب والأجور</option>
+            <option value="مبيعات متجر">🛍️ مبيعات المتجر</option>
+            <option value="مشتريات متجر">📦 مشتريات المتجر</option>
+            {categoryOptions
+              .filter((cat) => !['اشتراكات', 'الاشتراكات', 'عضويات', 'رواتب', 'الرواتب', 'مبيعات متجر', 'مشتريات متجر'].includes(cat))
+              .map((cat) => (
+                <option key={cat} value={cat}>📁 {cat}</option>
+              ))}
           </select>
         </div>
       </div>

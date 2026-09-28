@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AppIcon from '@/components/AppIcon';
 import { HomeLine } from '@untitledui/icons';
+import { useAuth } from '@/contexts/AuthContext';
 
 function getErrorMessage(error: unknown) {
   if (typeof error === 'string') return error;
@@ -15,6 +16,7 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const { setUser } = useAuth();
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -25,8 +27,8 @@ export default function Login() {
       await window.api?.login?.(email.trim(), password);
       const response = await window.api?.request?.('/auth/me');
       const user = response?.data;
-      if (user && typeof window !== 'undefined') {
-        window.localStorage.setItem('loggedInUser', JSON.stringify(user));
+      if (user) {
+        setUser(user as any);
       }
       navigate('/', { replace: true });
     } catch (err) {

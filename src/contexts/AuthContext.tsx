@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo } from 'react';
+import { createContext, useContext, useMemo, useState, useEffect } from 'react';
 import type { ReactNode } from 'react';
 
 export type UserRole = 'admin' | 'manager' | 'coach' | 'accountant';
@@ -29,6 +29,7 @@ const ROLE_EDITABLE: Record<UserRole, string[]> = {
 interface AuthContextValue {
   user: AuthUser | null;
   role: UserRole | null;
+  setUser: (user: AuthUser | null) => void;
   /** Returns true if current user can navigate to this path */
   hasPageAccess: (path: string) => boolean;
   /** Returns true if current user can add/edit/delete in this section */
@@ -38,6 +39,7 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue>({
   user: null,
   role: null,
+  setUser: () => {},
   hasPageAccess: () => false,
   canEdit: () => false,
 });
@@ -63,8 +65,33 @@ function normalizeRole(role: string | undefined): UserRole {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const user = useMemo(() => readUser(), []);
-  const role: UserRole | null = user ? normalizeRole(user.role) : null;
+  const [user, setUserState] = useState<AuthUser | null>(() => readUser());
+
+  useEffect(() => {
+    const handleStorage = () => {
+      setUserState(readUser());
+    };
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener('auth:change', handleStorage);
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('auth:change', handleStorage);
+    };
+  }, []);
+
+  const setUser = (newUser: AuthUser | null) => {
+    setUserState(newUser);
+    if (typeof window !== 'undefined') {
+      if (newUser) {
+        window.localStorage.setItem('loggedInUser', JSON.stringify(newUser));
+      } else {
+        window.localStorage.removeItem('loggedInUser');
+      }
+      window.dispatchEvent(new Event('auth:change'));
+    }
+  };
+
+  const role: UserRole | null = useMemo(() => (user ? normalizeRole(user.role) : null), [user]);
 
   const hasPageAccess = (path: string) => {
     if (!role) return false;
@@ -79,7 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, role, hasPageAccess, canEdit }}>
+    <AuthContext.Provider value={{ user, role, setUser, hasPageAccess, canEdit }}>
       {children}
     </AuthContext.Provider>
   );

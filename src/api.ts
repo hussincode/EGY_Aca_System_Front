@@ -4,7 +4,23 @@ type ApiResponse<T = unknown> = {
   success?: boolean;
 };
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://egyacaback.vercel.app';
+export function getApiBaseUrl(): string {
+  if (typeof window !== 'undefined') {
+    const customUrl = window.localStorage.getItem('custom_api_url');
+    if (customUrl) return customUrl.replace(/\/+$/, '');
+
+    const hostname = window.location.hostname;
+    // If accessed via local IP on LAN (e.g. 192.168.x.x or 10.x.x.x) and not vercel/cloud
+    if (hostname !== 'localhost' && hostname !== '127.0.0.1' && !hostname.includes('vercel.app')) {
+      return `http://${hostname}:5000`;
+    }
+  }
+  const envUrl = import.meta.env.VITE_API_BASE_URL;
+  if (envUrl && envUrl.trim()) return envUrl.replace(/\/+$/, '');
+  return 'https://egyacaback.vercel.app';
+}
+
+export const API_BASE_URL = getApiBaseUrl();
 
 function getStoredToken() {
   if (typeof window === 'undefined') return null;
@@ -21,8 +37,9 @@ function saveStoredToken(token: string | null) {
 }
 
 function resolveApiUrl(url: string) {
+  const baseUrl = getApiBaseUrl();
   const normalized = url.startsWith('/api') ? url : `/api${url.startsWith('/') ? url : `/${url}`}`;
-  return `${API_BASE_URL}${normalized}`;
+  return `${baseUrl}${normalized}`;
 }
 
 async function request<T = unknown>(url: string, options: RequestInit = {}) {

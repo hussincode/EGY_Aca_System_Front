@@ -66,6 +66,18 @@ type DisplayItem = {
 const ATTENDANCE_KEY = 'attendanceRecords';
 const PLAYERS_KEY = 'players';
 const SUBSCRIPTIONS_KEY = 'subscriptions';
+const BRANCHES_KEY = 'branches';
+const GAMES_KEY = 'games';
+
+type Branch = {
+  id: string;
+  name: string;
+};
+
+type Game = {
+  id: string;
+  name: string;
+};
 
 const DAYS_OF_WEEK_AR = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
 
@@ -181,9 +193,13 @@ export default function Attendance() {
   const [records, setRecords] = useState<AttendanceRecord[]>(() => readStorage(ATTENDANCE_KEY, []));
   const [players, setPlayers] = useState<Player[]>(() => readStorage(PLAYERS_KEY, []));
   const [subscriptions, setSubscriptions] = useState<SubscriptionRecord[]>(() => readStorage(SUBSCRIPTIONS_KEY, []));
+  const [branches, setBranches] = useState<Branch[]>(() => readStorage(BRANCHES_KEY, []));
+  const [games, setGames] = useState<Game[]>(() => readStorage(GAMES_KEY, []));
 
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [branchFilter, setBranchFilter] = useState('all');
+  const [gameFilter, setGameFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState(todayStr);
   const [dateRangeFrom, setDateRangeFrom] = useState('');
   const [dateRangeTo, setDateRangeTo] = useState('');
@@ -200,6 +216,19 @@ export default function Attendance() {
   });
 
   const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+
+  // Storage cross-tab sync
+  useEffect(() => {
+    const sync = () => {
+      setRecords(readStorage(ATTENDANCE_KEY, []));
+      setPlayers(readStorage(PLAYERS_KEY, []));
+      setSubscriptions(readStorage(SUBSCRIPTIONS_KEY, []));
+      setBranches(readStorage(BRANCHES_KEY, []));
+      setGames(readStorage(GAMES_KEY, []));
+    };
+    window.addEventListener('storage', sync);
+    return () => window.removeEventListener('storage', sync);
+  }, []);
 
   // Daily 24h Reset Timer & Window Focus Check
   useEffect(() => {
@@ -245,10 +274,20 @@ export default function Attendance() {
       // Load Players for lookup
       if (api?.getPlayers) {
         try {
-          const res = (await api.getPlayers()) as { data?: Player[] };
+          const res = (await api.getPlayers()) as { data?: Array<Record<string, unknown>> };
           if (Array.isArray(res?.data) && res.data.length > 0) {
-            setPlayers(res.data);
-            saveToStorage(PLAYERS_KEY, res.data);
+            const mappedPlayers: Player[] = res.data.map((p) => ({
+              id: String(p.id || ''),
+              name: String(p.name || ''),
+              phone: p.phone ? String(p.phone) : undefined,
+              schedule: p.schedule ? String(p.schedule) : undefined,
+              game: p.game ? String(p.game) : (p.game_name ? String(p.game_name) : (p.sport ? String(p.sport) : undefined)),
+              branch: p.branch ? String(p.branch) : (p.branch_name ? String(p.branch_name) : undefined),
+              playerSerial: p.playerSerial ? String(p.playerSerial) : undefined,
+              playerBarcodeValue: p.playerBarcodeValue ? String(p.playerBarcodeValue) : undefined,
+            }));
+            setPlayers(mappedPlayers);
+            saveToStorage(PLAYERS_KEY, mappedPlayers);
           }
         } catch (err) {
           console.error('Failed to load players for attendance', err);
@@ -258,13 +297,61 @@ export default function Attendance() {
       // Load Subscriptions for schedules lookup
       if (api?.getSubscriptions) {
         try {
-          const res = (await api.getSubscriptions()) as { data?: SubscriptionRecord[] };
+          const res = (await api.getSubscriptions()) as { data?: Array<Record<string, unknown>> };
           if (Array.isArray(res?.data) && res.data.length > 0) {
-            setSubscriptions(res.data);
-            saveToStorage(SUBSCRIPTIONS_KEY, res.data);
+            const mappedSubs: SubscriptionRecord[] = res.data.map((s) => ({
+              id: String(s.id || ''),
+              playerId: String(s.playerId || s.player_id || ''),
+              player: String(s.player || s.player_name || ''),
+              schedule: String(s.schedule || ''),
+              game: String(s.game || s.game_name || ''),
+              branch: String(s.branch || s.branch_name || ''),
+              status: String(s.status || 'active'),
+              phone: s.phone ? String(s.phone) : undefined,
+              sessions: Number(s.sessions || 0),
+              playerCode: String(s.playerCode || s.player_code || s.playerSerial || ''),
+              invoiceNumber: String(s.invoiceNumber || s.invoice_number || ''),
+            }));
+            setSubscriptions(mappedSubs);
+            saveToStorage(SUBSCRIPTIONS_KEY, mappedSubs);
           }
         } catch (err) {
           console.error('Failed to load subscriptions for attendance', err);
+        }
+      }
+
+      // Load Branches
+      if (api?.getBranches) {
+        try {
+          const bRes = (await api.getBranches()) as { data?: Array<Record<string, unknown>> };
+          if (Array.isArray(bRes?.data) && bRes.data.length > 0) {
+            const mappedBranches: Branch[] = bRes.data.map((b) => ({
+              id: String(b.id || ''),
+              name: String(b.name || ''),
+            }));
+            setBranches(mappedBranches);
+            saveToStorage(BRANCHES_KEY, mappedBranches);
+          }
+        } catch (err) {
+          console.error('Failed to load branches for attendance', err);
+        }
+      }
+
+      // Load Sports / Games
+      const getSportsFn = api?.getSports || api?.getGames;
+      if (getSportsFn) {
+        try {
+          const gRes = (await getSportsFn()) as { data?: Array<Record<string, unknown>> };
+          if (Array.isArray(gRes?.data) && gRes.data.length > 0) {
+            const mappedGames: Game[] = gRes.data.map((g) => ({
+              id: String(g.id || ''),
+              name: String(g.name || ''),
+            }));
+            setGames(mappedGames);
+            saveToStorage(GAMES_KEY, mappedGames);
+          }
+        } catch (err) {
+          console.error('Failed to load games for attendance', err);
         }
       }
 
@@ -323,6 +410,35 @@ export default function Attendance() {
       stopCamera();
     };
   }, []);
+
+  // Unique Branch & Game options for dropdown filters
+  const uniqueBranchOptions = useMemo(() => {
+    const set = new Set<string>();
+    branches.forEach((b) => {
+      if (b.name?.trim()) set.add(b.name.trim());
+    });
+    players.forEach((p) => {
+      if (p.branch?.trim()) set.add(p.branch.trim());
+    });
+    subscriptions.forEach((s) => {
+      if (s.branch?.trim()) set.add(s.branch.trim());
+    });
+    return Array.from(set).sort();
+  }, [branches, players, subscriptions]);
+
+  const uniqueGameOptions = useMemo(() => {
+    const set = new Set<string>();
+    games.forEach((g) => {
+      if (g.name?.trim()) set.add(g.name.trim());
+    });
+    players.forEach((p) => {
+      if (p.game?.trim()) set.add(p.game.trim());
+    });
+    subscriptions.forEach((s) => {
+      if (s.game?.trim()) set.add(s.game.trim());
+    });
+    return Array.from(set).sort();
+  }, [games, players, subscriptions]);
 
   // Continuous Camera Frame Barcode & QR Code Scanner
   useEffect(() => {
@@ -400,6 +516,27 @@ export default function Attendance() {
     return matchesDay(sch, targetDay);
   };
 
+  // Helper to extract player details (schedule, game, branch, phone)
+  const getPlayerInfo = (playerId: string, playerName?: string, phone?: string) => {
+    const matchedPlayer = players.find(
+      (p) => p.id === playerId || (playerName && p.name.trim().toLowerCase() === playerName.trim().toLowerCase())
+    );
+    const matchedSub = subscriptions.find(
+      (s) =>
+        (matchedPlayer && (s.playerId === matchedPlayer.id || s.player === matchedPlayer.name)) ||
+        s.playerId === playerId ||
+        (playerName && s.player && s.player.trim().toLowerCase() === playerName.trim().toLowerCase()) ||
+        (phone && s.phone && s.phone === phone)
+    );
+
+    const game = matchedPlayer?.game || matchedSub?.game || '';
+    const branch = matchedPlayer?.branch || matchedSub?.branch || '';
+    const resolvedPhone = matchedPlayer?.phone || matchedSub?.phone || phone || '';
+    const schedule = matchedPlayer ? getPlayerScheduleStr(matchedPlayer) : (matchedSub?.schedule || '');
+
+    return { matchedPlayer, matchedSub, game, branch, phone: resolvedPhone, schedule };
+  };
+
   // Build full list of players scheduled for the selected day / date + existing records
   const displayItems = useMemo(() => {
     const itemsMap = new Map<string, DisplayItem>();
@@ -413,16 +550,16 @@ export default function Attendance() {
       players.forEach((player) => {
         const isScheduled = targetDay ? isPlayerScheduledOnDay(player, targetDay) : true;
         if (isScheduled) {
-          const sch = getPlayerScheduleStr(player);
+          const info = getPlayerInfo(player.id, player.name, player.phone);
           const existingRecord = records.find((r) => r.player_id === player.id && r.date === targetDate);
           itemsMap.set(player.id, {
             id: existingRecord ? existingRecord.id : `pending_${player.id}_${targetDate}`,
             player_id: player.id,
             player_name: player.name,
-            phone: player.phone,
-            game: player.game,
-            branch: player.branch,
-            schedule: sch,
+            phone: info.phone,
+            game: info.game,
+            branch: info.branch,
+            schedule: info.schedule,
             date: targetDate,
             status: existingRecord ? existingRecord.status : 'unrecorded',
             notes: existingRecord?.notes,
@@ -437,15 +574,15 @@ export default function Attendance() {
         .filter((r) => r.date === targetDate)
         .forEach((rec) => {
           if (!itemsMap.has(rec.player_id)) {
-            const matchedPlayer = players.find((p) => p.id === rec.player_id);
+            const info = getPlayerInfo(rec.player_id, rec.player_name, rec.phone);
             itemsMap.set(rec.player_id, {
               id: rec.id,
               player_id: rec.player_id,
-              player_name: rec.player_name || matchedPlayer?.name || rec.player_id,
-              phone: rec.phone || matchedPlayer?.phone,
-              game: matchedPlayer?.game,
-              branch: matchedPlayer?.branch,
-              schedule: rec.subscription_schedule || (matchedPlayer ? getPlayerScheduleStr(matchedPlayer) : ''),
+              player_name: rec.player_name || info.matchedPlayer?.name || rec.player_id,
+              phone: info.phone,
+              game: info.game,
+              branch: info.branch,
+              schedule: rec.subscription_schedule || info.schedule,
               date: rec.date,
               status: rec.status,
               notes: rec.notes,
@@ -460,7 +597,7 @@ export default function Attendance() {
       // Show ALL players scheduled for that day, with their recorded attendance (any date)
       players.forEach((player) => {
         if (!isPlayerScheduledOnDay(player, dayFilter)) return;
-        const sch = getPlayerScheduleStr(player);
+        const info = getPlayerInfo(player.id, player.name, player.phone);
         // Find the most recent record for this player on any date that matches the selected day
         const playerRecordsOnThisDay = records
           .filter((r) => r.player_id === player.id && getArabicDayOfWeek(r.date) === dayFilter)
@@ -470,10 +607,10 @@ export default function Attendance() {
           id: latestRecord ? latestRecord.id : `pending_${player.id}_day_${dayFilter}`,
           player_id: player.id,
           player_name: player.name,
-          phone: player.phone,
-          game: player.game,
-          branch: player.branch,
-          schedule: sch,
+          phone: info.phone,
+          game: info.game,
+          branch: info.branch,
+          schedule: info.schedule,
           date: latestRecord ? latestRecord.date : todayStr,
           status: latestRecord ? latestRecord.status : 'unrecorded',
           notes: latestRecord?.notes,
@@ -486,16 +623,15 @@ export default function Attendance() {
         .filter((r) => getArabicDayOfWeek(r.date) === dayFilter)
         .forEach((rec) => {
           if (!itemsMap.has(rec.player_id)) {
-            const matchedPlayer = players.find((p) => p.id === rec.player_id);
-            const sch = rec.subscription_schedule || (matchedPlayer ? getPlayerScheduleStr(matchedPlayer) : '');
+            const info = getPlayerInfo(rec.player_id, rec.player_name, rec.phone);
             itemsMap.set(rec.id, {
               id: rec.id,
               player_id: rec.player_id,
-              player_name: rec.player_name || matchedPlayer?.name || rec.player_id,
-              phone: rec.phone || matchedPlayer?.phone,
-              game: matchedPlayer?.game,
-              branch: matchedPlayer?.branch,
-              schedule: sch,
+              player_name: rec.player_name || info.matchedPlayer?.name || rec.player_id,
+              phone: info.phone,
+              game: info.game,
+              branch: info.branch,
+              schedule: rec.subscription_schedule || info.schedule,
               date: rec.date,
               status: rec.status,
               notes: rec.notes,
@@ -512,16 +648,15 @@ export default function Attendance() {
       records
         .filter((r) => r.date >= fromDate && r.date <= toDate)
         .forEach((rec) => {
-          const matchedPlayer = players.find((p) => p.id === rec.player_id);
-          const sch = rec.subscription_schedule || (matchedPlayer ? getPlayerScheduleStr(matchedPlayer) : '');
+          const info = getPlayerInfo(rec.player_id, rec.player_name, rec.phone);
           itemsMap.set(rec.id, {
             id: rec.id,
             player_id: rec.player_id,
-            player_name: rec.player_name || matchedPlayer?.name || rec.player_id,
-            phone: rec.phone || matchedPlayer?.phone,
-            game: matchedPlayer?.game,
-            branch: matchedPlayer?.branch,
-            schedule: sch,
+            player_name: rec.player_name || info.matchedPlayer?.name || rec.player_id,
+            phone: info.phone,
+            game: info.game,
+            branch: info.branch,
+            schedule: rec.subscription_schedule || info.schedule,
             date: rec.date,
             status: rec.status,
             notes: rec.notes,
@@ -533,16 +668,15 @@ export default function Attendance() {
     // ── Case 4: dateFilter === 'all', no day selected ──
     } else {
       records.forEach((rec) => {
-        const matchedPlayer = players.find((p) => p.id === rec.player_id);
-        const sch = rec.subscription_schedule || (matchedPlayer ? getPlayerScheduleStr(matchedPlayer) : '');
+        const info = getPlayerInfo(rec.player_id, rec.player_name, rec.phone);
         itemsMap.set(rec.id, {
           id: rec.id,
           player_id: rec.player_id,
-          player_name: rec.player_name || matchedPlayer?.name || rec.player_id,
-          phone: rec.phone || matchedPlayer?.phone,
-          game: matchedPlayer?.game,
-          branch: matchedPlayer?.branch,
-          schedule: sch,
+          player_name: rec.player_name || info.matchedPlayer?.name || rec.player_id,
+          phone: info.phone,
+          game: info.game,
+          branch: info.branch,
+          schedule: rec.subscription_schedule || info.schedule,
           date: rec.date,
           status: rec.status,
           notes: rec.notes,
@@ -557,15 +691,15 @@ export default function Attendance() {
         if (isScheduled) {
           const hasRecordToday = records.some((r) => r.player_id === player.id && r.date === todayStr);
           if (!hasRecordToday) {
-            const sch = getPlayerScheduleStr(player);
+            const info = getPlayerInfo(player.id, player.name, player.phone);
             itemsMap.set(`pending_${player.id}_${todayStr}`, {
               id: `pending_${player.id}_${todayStr}`,
               player_id: player.id,
               player_name: player.name,
-              phone: player.phone,
-              game: player.game,
-              branch: player.branch,
-              schedule: sch,
+              phone: info.phone,
+              game: info.game,
+              branch: info.branch,
+              schedule: info.schedule,
               date: todayStr,
               status: 'unrecorded',
               isRecorded: false,
@@ -578,9 +712,18 @@ export default function Attendance() {
     return Array.from(itemsMap.values());
   }, [records, players, subscriptions, dateFilter, dayFilter, dateRangeFrom, dateRangeTo, todayStr, todayDayName]);
 
+  // Scoped display items based on branch & game filters (used for stats & lists)
+  const scopedItems = useMemo(() => {
+    return displayItems.filter((item) => {
+      const matchesBranch = branchFilter === 'all' || (item.branch || '') === branchFilter;
+      const matchesGame = gameFilter === 'all' || (item.game || '') === gameFilter;
+      return matchesBranch && matchesGame;
+    });
+  }, [displayItems, branchFilter, gameFilter]);
+
   // Filtered display items based on search and status filter
   const filteredItems = useMemo(() => {
-    return displayItems.filter((item) => {
+    return scopedItems.filter((item) => {
       const search = searchText.trim().toLowerCase();
       const matchesSearch =
         !search ||
@@ -588,20 +731,22 @@ export default function Attendance() {
         (item.phone || '').toLowerCase().includes(search) ||
         (item.notes || '').toLowerCase().includes(search) ||
         (item.schedule || '').toLowerCase().includes(search) ||
+        (item.game || '').toLowerCase().includes(search) ||
+        (item.branch || '').toLowerCase().includes(search) ||
         item.date.includes(search);
 
       const matchesStatus = statusFilter === 'all' || item.status === statusFilter;
 
       return matchesSearch && matchesStatus;
     });
-  }, [displayItems, searchText, statusFilter]);
+  }, [scopedItems, searchText, statusFilter]);
 
   const [currentPage, setCurrentPage] = useState(1);
   const rowsPerPage = 10;
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchText, statusFilter, dateFilter, dayFilter, dateRangeFrom, dateRangeTo]);
+  }, [searchText, statusFilter, branchFilter, gameFilter, dateFilter, dayFilter, dateRangeFrom, dateRangeTo]);
 
   const totalPages = Math.ceil(filteredItems.length / rowsPerPage) || 1;
   const paginatedItems = useMemo(() => {
@@ -609,12 +754,12 @@ export default function Attendance() {
     return filteredItems.slice(start, start + rowsPerPage);
   }, [filteredItems, currentPage]);
 
-  // Statistics Metrics
-  const totalItems = displayItems.length;
-  const presentCount = displayItems.filter((r) => r.status === 'present').length;
-  const absentCount = displayItems.filter((r) => r.status === 'absent').length;
-  const lateCount = displayItems.filter((r) => r.status === 'late').length;
-  const unrecordedCount = displayItems.filter((r) => r.status === 'unrecorded').length;
+  // Statistics Metrics (calculated based on scoped branch & game selection)
+  const totalItems = scopedItems.length;
+  const presentCount = scopedItems.filter((r) => r.status === 'present').length;
+  const absentCount = scopedItems.filter((r) => r.status === 'absent').length;
+  const lateCount = scopedItems.filter((r) => r.status === 'late').length;
+  const unrecordedCount = scopedItems.filter((r) => r.status === 'unrecorded').length;
   const totalRecorded = presentCount + absentCount + lateCount;
   const attendanceRate = totalRecorded > 0 ? Math.round((presentCount / totalRecorded) * 100) : 0;
 
@@ -756,7 +901,7 @@ export default function Attendance() {
     const targetPlayerId = matchedPlayer?.id || matchedSub?.playerId || `custom_${Date.now()}`;
     const totalSessions = Number(matchedSub?.sessions || 0);
 
-    // RULE 1: Session Limit Check ("لو عنده تلات ايام لازم اسكان ال qr code تلات مرات بس")
+    // RULE 1: Session Limit Check
     if (matchedSub && totalSessions > 0) {
       const currentAttendedCount = records.filter(
         (r) =>
@@ -773,7 +918,7 @@ export default function Attendance() {
       }
     }
 
-    // RULE 2: Scheduled Day Check ("لو عنده يوم الحد و جي في يوم تاني غيره يسال الي بيعمل scan: ده مش اليوم المحدد هل ترغب ان تسجله اليوم")
+    // RULE 2: Scheduled Day Check
     const scheduledDaysStr = matchedSub?.schedule || (matchedPlayer ? getPlayerScheduleStr(matchedPlayer) : '');
     const isTodayScheduled = scheduledDaysStr ? matchesDay(scheduledDaysStr, todayDayName) : true;
 
@@ -847,10 +992,10 @@ export default function Attendance() {
   /* ── Automatic Absence Engine ─────────────────────────── */
   const handleAutoAbsenceUnrecorded = async () => {
     const targetDate = dateFilter === 'all' ? todayStr : dateFilter;
-    const unrecordedItems = displayItems.filter((item) => item.status === 'unrecorded');
+    const unrecordedItems = scopedItems.filter((item) => item.status === 'unrecorded');
 
     if (unrecordedItems.length === 0) {
-      showToast('لا يوجد لاعبين متبقيين بدون تسجيل لهذا اليوم', 'info');
+      showToast('لا يوجد لاعبين متبقيين بدون تسجيل في هذا العرض', 'info');
       return;
     }
 
@@ -1021,6 +1166,12 @@ export default function Attendance() {
                 <span className="font-bold text-sky-700 underline">
                   يوم {currentActiveDayName} ({dateFilter === 'all' ? 'جميع التواريخ' : dateFilter})
                 </span>
+                {branchFilter !== 'all' && (
+                  <span className="mr-2 font-semibold text-amber-700">| فرع: {branchFilter}</span>
+                )}
+                {gameFilter !== 'all' && (
+                  <span className="mr-2 font-semibold text-teal-700">| لعبة: {gameFilter}</span>
+                )}
               </p>
             </div>
           </div>
@@ -1102,7 +1253,7 @@ export default function Attendance() {
             <input
               value={searchText}
               onChange={(event) => setSearchText(event.target.value)}
-              placeholder="بحث باسم اللاعب، الهاتف، أيام التمرين..."
+              placeholder="بحث باسم اللاعب، الهاتف، اللعبة، الفرع، أيام التمرين..."
               className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pr-9 pl-3 text-right text-xs text-slate-900 outline-none focus:border-sky-500 focus:bg-white"
             />
           </div>
@@ -1115,10 +1266,12 @@ export default function Attendance() {
               setDateRangeFrom('');
               setDateRangeTo('');
               setStatusFilter('all');
+              setBranchFilter('all');
+              setGameFilter('all');
               setSearchText('');
             }}
             className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold shadow-sm transition ${
-              dateFilter === todayStr && dayFilter === 'all' && !dateRangeFrom
+              dateFilter === todayStr && dayFilter === 'all' && !dateRangeFrom && branchFilter === 'all' && gameFilter === 'all'
                 ? 'bg-sky-600 text-white ring-2 ring-sky-300'
                 : 'bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100'
             }`}
@@ -1131,10 +1284,10 @@ export default function Attendance() {
           </button>
         </div>
 
-        {/* Row 2: Filters */}
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {/* Row 2: Filters Grid */}
+        <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
           {/* Date Range From → To */}
-          <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 lg:col-span-1">
+          <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5">
             <span className="shrink-0 text-[11px] font-semibold text-slate-500">من</span>
             <input
               type="date"
@@ -1216,6 +1369,34 @@ export default function Attendance() {
             ))}
           </select>
 
+          {/* Branch filter */}
+          <select
+            value={branchFilter}
+            onChange={(event) => setBranchFilter(event.target.value)}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-700 outline-none focus:border-sky-500"
+          >
+            <option value="all">كل الفروع</option>
+            {uniqueBranchOptions.map((name) => (
+              <option key={name} value={name}>
+                🏢 {name}
+              </option>
+            ))}
+          </select>
+
+          {/* Game filter */}
+          <select
+            value={gameFilter}
+            onChange={(event) => setGameFilter(event.target.value)}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-700 outline-none focus:border-sky-500"
+          >
+            <option value="all">كل الألعاب</option>
+            {uniqueGameOptions.map((name) => (
+              <option key={name} value={name}>
+                ⚽ {name}
+              </option>
+            ))}
+          </select>
+
           {/* Status filter */}
           <select
             value={statusFilter}
@@ -1231,9 +1412,21 @@ export default function Attendance() {
         </div>
 
         {/* Active Filter Tags */}
-        {(dayFilter !== 'all' || dateRangeFrom || (dateFilter !== 'all' && dateFilter !== todayStr)) && (
+        {(dayFilter !== 'all' || dateRangeFrom || branchFilter !== 'all' || gameFilter !== 'all' || (dateFilter !== 'all' && dateFilter !== todayStr)) && (
           <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2">
             <span className="text-[11px] font-semibold text-slate-400">الفلاتر النشطة:</span>
+            {branchFilter !== 'all' && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-bold text-amber-800">
+                🏢 فرع: {branchFilter}
+                <button type="button" onClick={() => setBranchFilter('all')} className="text-amber-500 hover:text-rose-500 font-bold">×</button>
+              </span>
+            )}
+            {gameFilter !== 'all' && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-teal-100 px-2.5 py-0.5 text-[11px] font-bold text-teal-800">
+                ⚽ اللعبة: {gameFilter}
+                <button type="button" onClick={() => setGameFilter('all')} className="text-teal-500 hover:text-rose-500 font-bold">×</button>
+              </span>
+            )}
             {dayFilter !== 'all' && (
               <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2.5 py-0.5 text-[11px] font-bold text-indigo-700">
                 يوم {dayFilter}
@@ -1261,7 +1454,7 @@ export default function Attendance() {
         /* ── Compact Cards View ── */
         paginatedItems.length === 0 ? (
           <div className="rounded-2xl border border-slate-200 bg-white p-12 text-center text-sm text-slate-400">
-            لا يوجد لاعبين لديهم حصص في هذا اليوم أو ينطبق عليهم البحث.
+            لا يوجد لاعبين لديهم حصص في هذا اليوم أو ينطبق عليهم البحث والفلاتر المختارة.
           </div>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -1304,6 +1497,21 @@ export default function Attendance() {
                           </span>
                         </div>
                       </div>
+
+                      {(item.game || item.branch) && (
+                        <div className="flex flex-wrap items-center gap-1.5 bg-slate-50 p-2 rounded-lg">
+                          {item.game && (
+                            <span className="inline-flex items-center gap-1 rounded-md bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-700 border border-sky-100">
+                              ⚽ {item.game}
+                            </span>
+                          )}
+                          {item.branch && (
+                            <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800 border border-amber-200">
+                              🏢 {item.branch}
+                            </span>
+                          )}
+                        </div>
+                      )}
 
                       {item.schedule ? (
                         <div className="bg-sky-50/50 p-2 rounded-lg text-sky-800 text-[11px]">
@@ -1369,6 +1577,7 @@ export default function Attendance() {
               <thead className="bg-slate-50 text-slate-500">
                 <tr>
                   <th className="px-4 py-3 font-semibold">اللاعب</th>
+                  <th className="px-4 py-3 font-semibold">اللعبة والفرع</th>
                   <th className="px-4 py-3 font-semibold">أيام التمرين المقررة</th>
                   <th className="px-4 py-3 font-semibold">التاريخ</th>
                   <th className="px-4 py-3 font-semibold">الحالة الحالية</th>
@@ -1388,6 +1597,24 @@ export default function Attendance() {
                             <div>{item.player_name}</div>
                             {item.phone ? <div className="text-[10px] text-slate-400 font-normal">{item.phone}</div> : null}
                           </div>
+                        </div>
+                      </td>
+
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {item.game ? (
+                            <span className="inline-flex items-center gap-1 rounded-md bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-700 border border-sky-100">
+                              ⚽ {item.game}
+                            </span>
+                          ) : null}
+                          {item.branch ? (
+                            <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800 border border-amber-200">
+                              🏢 {item.branch}
+                            </span>
+                          ) : null}
+                          {!item.game && !item.branch ? (
+                            <span className="text-slate-400 text-[11px]">غير محدد</span>
+                          ) : null}
                         </div>
                       </td>
 
@@ -1449,8 +1676,8 @@ export default function Attendance() {
 
                 {filteredItems.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-10 text-center text-slate-400 text-xs">
-                      لا يوجد لاعبين لديهم حصص في هذا اليوم أو ينطبق عليهم البحث.
+                    <td colSpan={6} className="px-4 py-10 text-center text-slate-400 text-xs">
+                      لا يوجد لاعبين لديهم حصص في هذا اليوم أو ينطبق عليهم البحث والفلاتر المختارة.
                     </td>
                   </tr>
                 )}

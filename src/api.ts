@@ -414,6 +414,51 @@ const api = {
     return Promise.resolve({ ok: true });
   },
 
+  // ========== STORE ==========
+  getStoreProducts() {
+    return request<ApiResponse<Array<unknown>>>('/store/products');
+  },
+
+  createStoreProduct(product: Record<string, any>) {
+    return request<ApiResponse>('/store/products', {
+      method: 'POST',
+      body: JSON.stringify(product),
+    });
+  },
+
+  updateStoreProduct(id: string, product: Record<string, any>) {
+    return request<ApiResponse>(`/store/products/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(product),
+    });
+  },
+
+  deleteStoreProduct(id: string) {
+    return request<void>(`/store/products/${id}`, { method: 'DELETE' });
+  },
+
+  getStoreSales() {
+    return request<ApiResponse<Array<unknown>>>('/store/sales');
+  },
+
+  createStoreSale(sale: Record<string, any>) {
+    return request<ApiResponse>('/store/sales', {
+      method: 'POST',
+      body: JSON.stringify(sale),
+    });
+  },
+
+  updateStoreSale(id: string, sale: Record<string, any>) {
+    return request<ApiResponse>(`/store/sales/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(sale),
+    });
+  },
+
+  deleteStoreSale(id: string) {
+    return request<void>(`/store/sales/${id}`, { method: 'DELETE' });
+  },
+
   // ========== SYSTEM & DATABASE ==========
   resetDatabaseExceptUsers() {
     return request<ApiResponse>('/system/reset-except-users', {

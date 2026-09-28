@@ -81,6 +81,15 @@ interface WindowApi {
   register: (payload: { name: string; email: string; password: string; role: string; branch_id?: string }) => Promise<unknown>;
   updateUser: (id: string, updates: Record<string, unknown>) => Promise<unknown>;
   deleteUser: (id: string) => Promise<unknown>;
+  // Store
+  getStoreProducts: () => Promise<ApiListResponse<unknown[]>>;
+  createStoreProduct: (product: Record<string, any>) => Promise<ApiResponse<unknown>>;
+  updateStoreProduct: (id: string, product: Record<string, any>) => Promise<ApiResponse<unknown>>;
+  deleteStoreProduct: (id: string) => Promise<unknown>;
+  getStoreSales: () => Promise<ApiListResponse<unknown[]>>;
+  createStoreSale: (sale: Record<string, any>) => Promise<ApiResponse<unknown>>;
+  updateStoreSale: (id: string, sale: Record<string, any>) => Promise<ApiResponse<unknown>>;
+  deleteStoreSale: (id: string) => Promise<unknown>;
   // Invoices
   sendInvoiceNotification: (phone: string, imageData: string, caption: string) => Promise<unknown>;
   // Dashboard
